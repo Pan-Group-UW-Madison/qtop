@@ -3,36 +3,40 @@ close all;
 clc;
 
 figure;
-set(gcf, 'position', [200, 200, 600, 200])
+set(gcf, 'position', [200, 200, 600, 600]);
 
-nelx = 120;
+nelx = 40;
 nely = 40;
-rmin = 2;
+rmin = 1.4;
 volfrac0 = 0.5;
 volfrac = 1.0;
 %% MATERIAL PROPERTIES
-E0 = 1;
-Emin = 1e-9;
-nu = 0.3;
+k0 = 0.6; % good thermal conductivity
+kmin = 0.4; % poor thermal conductivity
 %% PREPARE FINITE ELEMENT ANALYSIS
-A11 = [12 3 -6 -3; 3 12 3 0; -6 3 12 -3; -3 0 -3 12];
-A12 = [-6 -3 0 3; -3 -6 -3 -6; 0 -3 -6 3; 3 -6 3 -6];
-B11 = [-4 3 -2 9; 3 -4 -9 4; -2 -9 -4 -3; 9 4 -3 -4];
-B12 = [2 -3 4 -9; -3 2 9 -2; 4 9 2 3; -9 -2 3 2];
-KE = 1 / (1 - nu^2) / 24 * ([A11 A12; A12' A11] + nu * [B11 B12; B12' B11]);
+KE = [2/3 -1/6 -1/3 -1/6
+    -1/6 2/3 -1/6 -1/3
+    -1/3 -1/6 2/3 -1/6
+    -1/6 -1/3 -1/6 2/3];
+% KE = [2/3 -2/3 -1/3 1/3;
+%     -2/3 2/3 1/3 -1/3;
+%     -1/3 1/3 2/3 -2/3;
+%     1/3 -1/3 -2/3 2/3];
 nodenrs = reshape(1:(1 + nelx) * (1 + nely), 1 + nely, 1 + nelx);
-edofVec = reshape(2 * nodenrs(1:end - 1, 1:end - 1) + 1, nelx * nely, 1);
-edofMat = repmat(edofVec, 1, 8) + repmat([0 1 2 * nely + [2 3 0 1] -2 -1], nelx * nely, 1);
-iK = reshape(kron(edofMat, ones(8, 1))', 64 * nelx * nely, 1);
-jK = reshape(kron(edofMat, ones(1, 8))', 64 * nelx * nely, 1);
+edofVec = reshape(nodenrs(1:end - 1, 1:end - 1) + 1, nelx * nely, 1);
+edofMat = repmat(edofVec, 1, 4) + repmat([0 nely + [1 0] -1], nelx * nely, 1);
+iK = reshape(kron(edofMat, ones(4, 1))', 16 * nelx * nely, 1);
+jK = reshape(kron(edofMat, ones(1, 4))', 16 * nelx * nely, 1);
 % DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
-F = sparse(2, 1, -1, 2 * (nely + 1) * (nelx + 1), 1);
-U = zeros(2 * (nely + 1) * (nelx + 1), 1);
-fixeddofs = union([1:2:2 * (nely + 1)], [2 * (nelx + 1) * (nely + 1)]);
-alldofs = [1:2 * (nely + 1) * (nelx + 1)];
+F = sparse(1:(nelx + 1) * (nely + 1), 1, 0.01, (nelx + 1) * (nely + 1), 1);
+% F = sparse(ceil((nelx+1)*(nely+1)/2), 1, 1, (nelx + 1) * (nely + 1), 1);
+U = zeros((nely + 1) * (nelx + 1), 1);
+fixeddofs = nely / 2 + 1 - floor(nely / 20):nely / 2 + 1 + floor(nely / 20);
+% fixeddofs = 1:nely+1;
+alldofs = 1:(nely + 1) * (nelx + 1);
 freedofs = setdiff(alldofs, fixeddofs);
 %% PREPARE FILTER
-iH = ones(nelx * nely * (2 * (ceil(rmin) - 1) + 1)^2, 1);
+iH = ones(nelx * nely * ((ceil(rmin) - 1) + 1)^2, 1);
 jH = ones(size(iH));
 sH = zeros(size(iH));
 k = 0;
@@ -61,23 +65,28 @@ end
 H = sparse(iH, jH, sH);
 Hs = sum(H, 2);
 %% INITIALIZE ITERATION
-x = ones(nely, nelx);
 loop = 0;
+x = ones(nely, nelx);
 
 dvol = 100;
 stage = 1;
 totalLoop = 0;
-epsilon = 1e-2;
+epsilon = 1e-7;
 
 numFeasibleCut = 0;
 
 compliance = [];
 volume = [];
 
+% stage = 2;
+% load('x_thermal');
+
+% colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+
 while stage < 3
     loop = loop + 1;
     Lower = 0;
-    Upper = 1e9;
+    Upper = 1e11;
 
     if stage == 1
         vol = floor(volfrac * nelx * nely);
@@ -88,10 +97,10 @@ while stage < 3
 
     if stage == 2
         vol = floor(volfrac0 * nelx * nely);
-        epsilon = 1e-5;
+        epsilon = 1e-9;
     end
 
-    colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+    %     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
     innerLoop = 0;
     exitFlag = 1;
@@ -106,15 +115,24 @@ while stage < 3
 
     % prepare the intitial solution
     xPhys = x;
-    sK = reshape(KE(:) * (Emin + xPhys(:)' * (E0 - Emin)), 64 * nelx * nely, 1);
+    %     xPhys = reshape(H * (x(:) ./ Hs), nely, nelx);
+    xPhys(xPhys < 1e-3) = kmin;
+    xPhys(x > 1e-3) = k0;
+    sK = reshape(KE(:) * (xPhys(:)'), 16 * nelx * nely, 1);
     K = sparse(iK, jK, sK); K = (K + K') / 2;
     U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
     ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
-    c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
-    ce(:) = ce .* x;
+    ce(:) = ce .* xPhys.^2;
+    %     [ce] = check(nelx, nely, rmin, xPhys, ce);
+    %     ce = ce.*x;
+    c = F' * U;
+    disp(c);
+    %     ce(:) = ce .* xPhys;
     ce(:) = H * (ce(:) ./ Hs);
 
     [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    %         [xResult, cost, exitFlag] = gbdMasterCutRelaxed(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    % [xResult, cost, exitFlag] = gbdMasterCutQuantum(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
 
     x = reshape(xResult, size(x, 1), size(x, 2));
     xOptimal = x;
@@ -127,13 +145,22 @@ while stage < 3
 
         % primal problem
         xPhys = x;
-        sK = reshape(KE(:) * (Emin + xPhys(:)' * (E0 - Emin)), 64 * nelx * nely, 1);
+        xPhys(x < 1e-3) = kmin;
+        xPhys(x > 1e-3) = k0;
+        %         xPhys = reshape(H * (x(:) ./ Hs), nely, nelx);
+        %         xPhys(xPhys<1e-3) = kmin;
+        sK = reshape(KE(:) * (xPhys(:)'), 16 * nelx * nely, 1);
         K = sparse(iK, jK, sK); K = (K + K') / 2;
         U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
         ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
-        c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
-        ce(:) = ce .* x;
+        ce(:) = ce .* xPhys.^2;
         ce(:) = H * (ce(:) ./ Hs);
+        %         ce = ce.*x;
+        c = F' * U;
+        %         if stage == 1
+        %         ce(:) = ce .* xPhys;
+        %         ce(:) = H * (ce(:) ./ Hs);
+        %         end
 
         if c < Upper
             xOptimal = x;
@@ -145,7 +172,7 @@ while stage < 3
             numFeasibleCut = numFeasibleCut + 1;
             U(freedofs) = feasibilityCut(K(freedofs, freedofs), F(freedofs), Upper);
             ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
-            c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
+            c = sum(sum((Emin + xPhys * (k0 - kmin)) .* ce));
 
             xFeasible = [xFeasible reshape(x, [], 1)];
             ceFeasible = [ceFeasible; reshape(ce, 1, [])];
@@ -155,6 +182,7 @@ while stage < 3
             ceTarget = [ceTarget; reshape(ce, 1, [])];
             cTarget = [cTarget; c];
             index = [];
+            %                         index = 1:length(cTarget);
 
             for i = 1:length(cTarget)
 
@@ -167,13 +195,14 @@ while stage < 3
         end
 
         % master problem
+        % if stage == 1
         [xResult, cost, exitFlag] = gbdMasterCut(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        %                 [xResult, cost, exitFlag] = gbdMasterCutRelaxed(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        % else
+        %     [xResult, cost, exitFlag] = gbdMasterCutQuantum(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        % end
 
-        if exitFlag == 1
-            x = reshape(xResult, size(x, 1), size(x, 2));
-        else
-            break;
-        end
+        x = reshape(xResult, size(x, 1), size(x, 2));
 
         colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
 
@@ -216,7 +245,13 @@ plot(compliance, 'b.-');
 yyaxis right
 plot(volume ./ (nelx * nely), 'r.-');
 
-save('gbd_history_dvol200', 'compliance');
+figure;
+pcolor(reshape(U, nelx + 1, nely + 1));
+axis equal;
+colorbar;
+% caxis([0 50]);
+
+% save('x_thermal', 'x');
 
 function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
     n = size(y, 2);
@@ -225,17 +260,17 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
     f = zeros(1, l + 1);
     f(1) = 1;
     lb = zeros(1, l + 1);
-    lb(1) = -inf;
+    lb(1) = 0;
     ub = ones(1, l + 1);
     ub(1) = inf;
 
-    A = zeros(n + m + 1, l + 1);
-    b = zeros(n + m + 1, 1);
+    A = zeros(n + m, l + 1);
+    b = zeros(n + m, 1);
 
     for i = 1:n
         A(i, 1) = -1;
         A(i, 2:end) = -weight(i, :);
-        b(i) = -obj(i) - weight(i, :) * y(:, i);
+        b(i) = -obj(i) + -weight(i, :) * y(:, i);
     end
 
     for i = 1:m
@@ -246,16 +281,17 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
     intcon = 1:l;
     intcon = intcon + 1;
 
-    A(end, :) = ones(1, l + 1);
-    A(end, 1) = 0;
-    b(end) = vol;
+    %     A(end, :) = ones(1, l + 1);
+    %     A(end, 1) = 0;
+    %     b(end) = vol;
 
-    % Aeq = ones(1, l + 1);
-    % Aeq(1, 1) = 0;
-    % beq = vol;
+    Aeq = ones(1, l + 1);
+    Aeq(1, 1) = 0;
+    beq = vol;
 
-    %     options = optimoptions('intlinprog','IntegerPreprocess','none');
-    [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, [], [], lb, ub);
+    options = optimoptions('intlinprog', 'RelativeGapTolerance', 5e-1);
+    [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, Aeq, beq, lb, ub, [], options);
+    %     [x, objFunc, exitFlag, ~] = linprog(f, A, b, [], [], lb, ub);
 
     if exitFlag ~= 1
         x = y;
@@ -280,11 +316,11 @@ function [x, objFunc, exitFlag] = gbdMasterCutRelaxed(y, obj, weight, yFeasible,
 
         intcon = 1:l;
 
-        Aeq = ones(1, l);
-        beq = vol;
+        A = ones(1, l);
+        b = vol;
 
         %     options = optimoptions('intlinprog','IntegerPreprocess','none');
-        [x, ~, exitFlag, ~] = intlinprog(f, intcon, Aeq, beq, [], [], lb, ub);
+        [x, ~, exitFlag, ~] = intlinprog(f, intcon, [], [], A, b, lb, ub);
 
         if exitFlag == 1
             objFunc = -inf;
@@ -346,6 +382,31 @@ function lambda = feasibilityCut(K, f, UB)
     function [c, ceq] = con(x)
         c = x' * K * x - f' * x;
         ceq = [];
+    end
+
+end
+
+function [dcn] = check(nelx, nely, rmin, x, dc)
+    dcn = zeros(nely, nelx);
+
+    for i = 1:nelx
+
+        for j = 1:nely
+            sum = 0.0;
+
+            for k = max(i - floor(rmin), 1):min(i + floor(rmin), nelx)
+
+                for l = max(j - floor(rmin), 1):min(j + floor(rmin), nely)
+                    fac = rmin - sqrt((i - k)^2 + (j - l)^2);
+                    sum = sum + max(0, fac);
+                    dcn(j, i) = dcn(j, i) + max(0, fac) * x(l, k) * dc(l, k);
+                end
+
+            end
+
+            dcn(j, i) = dcn(j, i) / (x(j, i) * sum);
+        end
+
     end
 
 end

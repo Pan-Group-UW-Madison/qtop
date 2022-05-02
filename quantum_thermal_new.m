@@ -2,15 +2,16 @@ clear all;
 close all;
 clc;
 
-figure;
-set(gcf, 'position', [200, 200, 600, 600])
+figure(1);
+set(gcf, 'position', [200, 200, 600, 600]);
+figure(2);
+set(gcf, 'position', [800, 200, 600, 600]);
 
-nelx = 150;
-nely = 150;
+nelx = 80;
+nely = 80;
 rmin = 1.4;
 volfrac0 = 0.5;
 volfrac = 1.0;
-vol = floor(volfrac0 * nelx * nely);
 %% MATERIAL PROPERTIES
 k0 = 1; % good thermal conductivity
 kmin = 1e-3; % poor thermal conductivity
@@ -29,6 +30,7 @@ F = sparse(1:(nelx + 1) * (nely + 1), 1, 0.01, (nelx + 1) * (nely + 1), 1);
 % F = sparse(ceil((nelx+1)*(nely+1)/2), 1, 1, (nelx + 1) * (nely + 1), 1);
 U = zeros((nely + 1) * (nelx + 1), 1);
 fixeddofs = nely / 2 + 1 - floor(nely / 20):nely / 2 + 1 + floor(nely / 20);
+% fixeddofs = 1:nely+1;
 alldofs = 1:(nely + 1) * (nelx + 1);
 freedofs = setdiff(alldofs, fixeddofs);
 %% PREPARE FILTER
@@ -61,17 +63,13 @@ end
 H = sparse(iH, jH, sH);
 Hs = sum(H, 2);
 %% INITIALIZE ITERATION
-x = zeros(nely, nelx);
-x(1:floor(nely * nelx / 2)) = 1;
+x = ones(nely, nelx);
 loop = 0;
 
-lowPhysics = 0.2;
-highPhysics = 0.8;
-dPhysics = 0.9;
-
+dvol = 10;
 stage = 1;
 totalLoop = 0;
-epsilon = 1e-3;
+epsilon = 1e-1;
 
 numFeasibleCut = 0;
 
@@ -81,15 +79,24 @@ volume = [];
 % stage = 2;
 % load('x_thermal');
 
-colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+% colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
-while highPhysics < 0.99
+while stage < 3
     loop = loop + 1;
     Lower = 0;
     Upper = 1e9;
 
-    lowPhysics = lowPhysics * dPhysics;
-    highPhysics = 1 - lowPhysics;
+    if stage == 1
+        vol = floor(volfrac * nelx * nely);
+        vol = vol - dvol;
+        vol = max(vol, volfrac0 * nelx * nely);
+        volfrac = vol / (nelx * nely);
+    end
+
+    if stage == 2
+        vol = floor(volfrac0 * nelx * nely);
+        epsilon = 1e-2;
+    end
 
     %     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
@@ -104,26 +111,46 @@ while highPhysics < 0.99
     ceFeasible = [];
     cFeasible = [];
 
+    % prepare the intitial solution
+    penalty = 5;
     xPhys = x;
-    xPhys(x == 1) = highPhysics;
-    xPhys(x == 0) = lowPhysics;
-    colormap(gray); imagesc(1 - xPhys); caxis([0 1]); axis equal; axis off; drawnow;
+    sK = reshape(KE(:) * (kmin + xPhys(:)' * (k0 - kmin)), 16 * nelx * nely, 1);
+    K = sparse(iK, jK, sK); K = (K + K') / 2;
+    U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
+    ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
+    c = sum(sum((kmin + xPhys * (k0 - kmin)) .* ce));
+%     ce(:) = ce .* x;
+    ce(:) = H * (ce(:) ./ Hs);
+
+    [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    %         [xResult, cost, exitFlag] = gbdMasterCutRelaxed(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    % [xResult, cost, exitFlag] = gbdMasterCutQuantum(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+
+    x = reshape(xResult, size(x, 1), size(x, 2));
+    xOptimal = x;
+
+    %     subplot(2, 1, 2);
+    figure(1);
+    colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+    figure(2);
+    pcolor(reshape(U, nely+1, nelx+1));
+    axis equal;
+    colorbar;
 
     while (1)
         innerLoop = innerLoop + 1;
 
         % primal problem
+        penalty = 5;
         xPhys = x;
-        xPhys(x == 1) = highPhysics;
-        xPhys(x == 0) = lowPhysics;
-        sK = reshape(KE(:) * (xPhys(:)' * (k0 - kmin)), 16 * nelx * nely, 1);
+        sK = reshape(KE(:) * (kmin + xPhys(:)' * (k0 - kmin)), 16 * nelx * nely, 1);
         K = sparse(iK, jK, sK); K = (K + K') / 2;
         U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
         ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
-        c = sum(sum((xPhys * k0) .* ce));
-        ce(:) = ce .* xPhys;
+        c = sum(sum((kmin + xPhys * (k0 - kmin)) .* ce));
+%         ce(:) = ce .* x;
         ce(:) = H * (ce(:) ./ Hs);
-        
+
         if c < Upper
             xOptimal = x;
             Upper = c;
@@ -144,15 +171,15 @@ while highPhysics < 0.99
             ceTarget = [ceTarget; reshape(ce, 1, [])];
             cTarget = [cTarget; c];
             index = [];
-%             index = 1:length(cTarget);
+            index = 1:length(cTarget);
 
-                        for i = 1:length(cTarget)
-            
-                            if (cTarget(i) <= c)
-                                index = [index; i];
-                            end
-            
-                        end
+%             for i = 1:length(cTarget)
+% 
+%                 if (cTarget(i) <= c)
+%                     index = [index; i];
+%                 end
+% 
+%             end
 
         end
 
@@ -165,14 +192,14 @@ while highPhysics < 0.99
         % end
 
         x = reshape(xResult, size(x, 1), size(x, 2));
-        
-        x(x > 0.5) = 1;
-        x(x <= 0.5) = 0;
 
-        xPhys = x;
-        xPhys(x == 1) = highPhysics;
-        xPhys(x == 0) = lowPhysics;
-        colormap(gray); imagesc(1 - xPhys); caxis([0 1]); axis equal; axis off; drawnow;
+        figure(1);
+        colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
+        figure(2);
+%         pcolor(reshape(U, nely+1, nelx+1));
+        pcolor(ce);
+        axis equal;
+        colorbar;
 
         if cost > Upper || (Upper - cost) / Upper < epsilon
             compliance = [compliance; Upper];
@@ -212,6 +239,11 @@ yyaxis left
 plot(compliance, 'b.-');
 yyaxis right
 plot(volume ./ (nelx * nely), 'r.-');
+
+figure;
+pcolor(reshape(U, nelx + 1, nely + 1));
+axis equal;
+colorbar;
 
 % save('x_thermal', 'x');
 

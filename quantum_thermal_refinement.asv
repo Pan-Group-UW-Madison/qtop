@@ -3,36 +3,36 @@ close all;
 clc;
 
 figure;
-set(gcf, 'position', [200, 200, 600, 200])
+set(gcf, 'position', [200, 200, 600, 600]);
 
-nelx = 120;
+nelx = 40;
 nely = 40;
-rmin = 2;
+rmin = 1.4;
 volfrac0 = 0.5;
 volfrac = 1.0;
 %% MATERIAL PROPERTIES
-E0 = 1;
-Emin = 1e-9;
-nu = 0.3;
+k0 = 1; % good thermal conductivity
+kmin = 1e-3; % poor thermal conductivity
 %% PREPARE FINITE ELEMENT ANALYSIS
-A11 = [12 3 -6 -3; 3 12 3 0; -6 3 12 -3; -3 0 -3 12];
-A12 = [-6 -3 0 3; -3 -6 -3 -6; 0 -3 -6 3; 3 -6 3 -6];
-B11 = [-4 3 -2 9; 3 -4 -9 4; -2 -9 -4 -3; 9 4 -3 -4];
-B12 = [2 -3 4 -9; -3 2 9 -2; 4 9 2 3; -9 -2 3 2];
-KE = 1 / (1 - nu^2) / 24 * ([A11 A12; A12' A11] + nu * [B11 B12; B12' B11]);
+KE = [2/3 -1/6 -1/3 -1/6
+    -1/6 2/3 -1/6 -1/3
+    -1/3 -1/6 2/3 -1/6
+    -1/6 -1/3 -1/6 2/3];
 nodenrs = reshape(1:(1 + nelx) * (1 + nely), 1 + nely, 1 + nelx);
-edofVec = reshape(2 * nodenrs(1:end - 1, 1:end - 1) + 1, nelx * nely, 1);
-edofMat = repmat(edofVec, 1, 8) + repmat([0 1 2 * nely + [2 3 0 1] -2 -1], nelx * nely, 1);
-iK = reshape(kron(edofMat, ones(8, 1))', 64 * nelx * nely, 1);
-jK = reshape(kron(edofMat, ones(1, 8))', 64 * nelx * nely, 1);
+edofVec = reshape(nodenrs(1:end - 1, 1:end - 1) + 1, nelx * nely, 1);
+edofMat = repmat(edofVec, 1, 4) + repmat([0 nely + [1 0] -1], nelx * nely, 1);
+iK = reshape(kron(edofMat, ones(4, 1))', 16 * nelx * nely, 1);
+jK = reshape(kron(edofMat, ones(1, 4))', 16 * nelx * nely, 1);
 % DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
-F = sparse(2, 1, -1, 2 * (nely + 1) * (nelx + 1), 1);
-U = zeros(2 * (nely + 1) * (nelx + 1), 1);
-fixeddofs = union([1:2:2 * (nely + 1)], [2 * (nelx + 1) * (nely + 1)]);
-alldofs = [1:2 * (nely + 1) * (nelx + 1)];
+% F = sparse(1:(nelx + 1) * (nely + 1), 1, 0.01, (nelx + 1) * (nely + 1), 1);
+% F = sparse(ceil((nelx+1)*(nely+1)/2), 1, 1, (nelx + 1) * (nely + 1), 1);
+U = zeros((nely + 1) * (nelx + 1), 1);
+fixeddofs = nely / 2 + 1 - floor(nely / 20):nely / 2 + 1 + floor(nely / 20);
+% fixeddofs = 1:nely+1;
+alldofs = 1:(nely + 1) * (nelx + 1);
 freedofs = setdiff(alldofs, fixeddofs);
 %% PREPARE FILTER
-iH = ones(nelx * nely * (2 * (ceil(rmin) - 1) + 1)^2, 1);
+iH = ones(nelx * nely * ((ceil(rmin) - 1) + 1)^2, 1);
 jH = ones(size(iH));
 sH = zeros(size(iH));
 k = 0;
@@ -64,15 +64,20 @@ Hs = sum(H, 2);
 x = ones(nely, nelx);
 loop = 0;
 
-dvol = 100;
+dvol = 50;
 stage = 1;
 totalLoop = 0;
-epsilon = 1e-2;
+epsilon = 1e-3;
 
 numFeasibleCut = 0;
 
 compliance = [];
 volume = [];
+%
+% stage = 2;
+% load('x_thermal');
+
+colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
 while stage < 3
     loop = loop + 1;
@@ -88,10 +93,10 @@ while stage < 3
 
     if stage == 2
         vol = floor(volfrac0 * nelx * nely);
-        epsilon = 1e-5;
+        epsilon = 1e-7;
     end
 
-    colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+    %     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
     innerLoop = 0;
     exitFlag = 1;
@@ -105,16 +110,13 @@ while stage < 3
     cFeasible = [];
 
     % prepare the intitial solution
-    xPhys = x;
-    sK = reshape(KE(:) * (Emin + xPhys(:)' * (E0 - Emin)), 64 * nelx * nely, 1);
-    K = sparse(iK, jK, sK); K = (K + K') / 2;
-    U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
-    ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
-    c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
-    ce(:) = ce .* x;
-    ce(:) = H * (ce(:) ./ Hs);
+    [c, ce] = femAnalysis(nelx, nely, x);
+%     ce(:) = ce .* x;
+%     ce(:) = H * (ce(:) ./ Hs);
 
     [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    %         [xResult, cost, exitFlag] = gbdMasterCutRelaxed(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    % [xResult, cost, exitFlag] = gbdMasterCutQuantum(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
 
     x = reshape(xResult, size(x, 1), size(x, 2));
     xOptimal = x;
@@ -126,14 +128,9 @@ while stage < 3
         innerLoop = innerLoop + 1;
 
         % primal problem
-        xPhys = x;
-        sK = reshape(KE(:) * (Emin + xPhys(:)' * (E0 - Emin)), 64 * nelx * nely, 1);
-        K = sparse(iK, jK, sK); K = (K + K') / 2;
-        U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
-        ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
-        c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
-        ce(:) = ce .* x;
-        ce(:) = H * (ce(:) ./ Hs);
+        [c, ce] = femAnalysis(nelx, nely, x);
+%         ce(:) = ce .* x;
+%         ce(:) = H * (ce(:) ./ Hs);
 
         if c < Upper
             xOptimal = x;
@@ -155,6 +152,7 @@ while stage < 3
             ceTarget = [ceTarget; reshape(ce, 1, [])];
             cTarget = [cTarget; c];
             index = [];
+            %             index = 1:length(cTarget);
 
             for i = 1:length(cTarget)
 
@@ -167,13 +165,14 @@ while stage < 3
         end
 
         % master problem
+        % if stage == 1
         [xResult, cost, exitFlag] = gbdMasterCut(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        %                 [xResult, cost, exitFlag] = gbdMasterCutRelaxed(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        % else
+        %     [xResult, cost, exitFlag] = gbdMasterCutQuantum(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        % end
 
-        if exitFlag == 1
-            x = reshape(xResult, size(x, 1), size(x, 2));
-        else
-            break;
-        end
+        x = reshape(xResult, size(x, 1), size(x, 2));
 
         colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
 
@@ -209,14 +208,17 @@ disp(numFeasibleCut)
 disp(Upper)
 disp(totalLoop)
 
-figure;
-hold on;
-yyaxis left
-plot(compliance, 'b.-');
-yyaxis right
-plot(volume ./ (nelx * nely), 'r.-');
+% figure;
+% hold on;
+% yyaxis left
+% plot(compliance, 'b.-');
+% yyaxis right
+% plot(volume ./ (nelx * nely), 'r.-');
 
-save('gbd_history_dvol200', 'compliance');
+% figure;
+% pcolor(reshape(U, nelx + 1, nely + 1));
+
+% save('x_thermal', 'x');
 
 function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
     n = size(y, 2);
@@ -250,9 +252,9 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
     A(end, 1) = 0;
     b(end) = vol;
 
-    % Aeq = ones(1, l + 1);
-    % Aeq(1, 1) = 0;
-    % beq = vol;
+    %     Aeq = ones(1, l + 1);
+    %     Aeq(1, 1) = 0;
+    %     beq = vol;
 
     %     options = optimoptions('intlinprog','IntegerPreprocess','none');
     [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, [], [], lb, ub);
@@ -280,11 +282,11 @@ function [x, objFunc, exitFlag] = gbdMasterCutRelaxed(y, obj, weight, yFeasible,
 
         intcon = 1:l;
 
-        Aeq = ones(1, l);
-        beq = vol;
+        A = ones(1, l);
+        b = vol;
 
         %     options = optimoptions('intlinprog','IntegerPreprocess','none');
-        [x, ~, exitFlag, ~] = intlinprog(f, intcon, Aeq, beq, [], [], lb, ub);
+        [x, ~, exitFlag, ~] = intlinprog(f, intcon, [], [], A, b, lb, ub);
 
         if exitFlag == 1
             objFunc = -inf;
@@ -346,6 +348,101 @@ function lambda = feasibilityCut(K, f, UB)
     function [c, ceq] = con(x)
         c = x' * K * x - f' * x;
         ceq = [];
+    end
+
+end
+
+function [c, ce] = femAnalysis(nelx, nely, x)
+    error = 1e9;
+    k0 = 1; % good thermal conductivity
+    kmin = 1e-3; % poor thermal conductivity
+
+    KE = [2/3 -1/6 -1/3 -1/6
+        -1/6 2/3 -1/6 -1/3
+        -1/3 -1/6 2/3 -1/6
+        -1/6 -1/3 -1/6 2/3];
+    nodenrs = reshape(1:(1 + nelx) * (1 + nely), 1 + nely, 1 + nelx);
+    edofVec = reshape(nodenrs(1:end - 1, 1:end - 1) + 1, nelx * nely, 1);
+    edofMat = repmat(edofVec, 1, 4) + repmat([0 nely + [1 0] -1], nelx * nely, 1);
+    iK = reshape(kron(edofMat, ones(4, 1))', 16 * nelx * nely, 1);
+    jK = reshape(kron(edofMat, ones(1, 4))', 16 * nelx * nely, 1);
+    F = sparse(1:(nelx + 1) * (nely + 1), 1, 0.01, (nelx + 1) * (nely + 1), 1);
+    U_base = zeros((nely + 1) * (nelx + 1), 1);
+    fixeddofs = nely / 2 + 1 - floor(nely / 20):nely / 2 + 1 + floor(nely / 20);
+    alldofs = 1:(nely + 1) * (nelx + 1);
+    freedofs = setdiff(alldofs, fixeddofs);
+    sK = reshape(KE(:) * (kmin + x(:)' * (k0 - kmin)), 16 * nelx * nely, 1);
+    K = sparse(iK, jK, sK); K = (K + K') / 2;
+    U_base(freedofs) = K(freedofs, freedofs) \ F(freedofs);
+    ce_base = reshape(sum((U_base(edofMat) * KE) .* U_base(edofMat), 2), nely, nelx);
+    c_base = sum(sum((kmin + x * (k0 - kmin)) .* ce_base));
+
+    counter = 1;
+
+    while error > 1e-3 && counter <= 1
+        h = 2^(-counter);
+        KE = (1 / h^2) * [2/3 -1/6 -1/3 -1/6
+                    -1/6 2/3 -1/6 -1/3
+                    -1/3 -1/6 2/3 -1/6
+                    -1/6 -1/3 -1/6 2/3];
+        nelx = nelx * 2;
+        nely = nely * 2;
+        xExtented = extendMatrix(x, 2^counter, 2^counter);
+        nodenrs = reshape(1:(1 + nelx) * (1 + nely), 1 + nely, 1 + nelx);
+        edofVec = reshape(nodenrs(1:end - 1, 1:end - 1) + 1, nelx * nely, 1);
+        edofMat = repmat(edofVec, 1, 4) + repmat([0 nely + [1 0] -1], nelx * nely, 1);
+        iK = reshape(kron(edofMat, ones(4, 1))', 16 * nelx * nely, 1);
+        jK = reshape(kron(edofMat, ones(1, 4))', 16 * nelx * nely, 1);
+        F = sparse(1:(nelx + 1) * (nely + 1), 1, 0.01, (nelx + 1) * (nely + 1), 1) * h;
+        U = zeros((nely + 1) * (nelx + 1), 1);
+        fixeddofs = nely / 2 + 1 - floor(nely / 20):nely / 2 + 1 + floor(nely / 20);
+        alldofs = 1:(nely + 1) * (nelx + 1);
+        freedofs = setdiff(alldofs, fixeddofs);
+        sK = reshape(KE(:) * (kmin + xExtented(:)' * (k0 - kmin)), 16 * nelx * nely, 1);
+        K = sparse(iK, jK, sK); K = (K + K') / 2;
+        U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
+        ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
+        ce_recast = shrinkMat(ce, 2^counter, 2^counter);
+        c = sum(sum((kmin + xExtented * (k0 - kmin)) .* ce));
+        c_recast = sum(sum((kmin + x * (k0 - kmin)) .* ce_recast));
+
+        error = abs(c_recast-c_base)/c_recast;
+        counter = counter + 1;
+    end
+    ce = ce_recast;
+end
+
+function result = extendMatrix(mat, nx, ny)
+    n = size(mat);
+    nx = floor(nx);
+    ny = floor(ny);
+    result = zeros(n(1) * nx, n(2) * ny);
+    mx = ((1:n(1)) - 1) * nx + 1;
+    my = ((1:n(2)) - 1) * ny + 1;
+
+    for i = 0:nx - 1
+
+        for j = 0:ny - 1
+            result(mx + i, my + j) = mat;
+        end
+
+    end
+
+end
+
+function result = shrinkMat(mat, nx, ny)
+    n = size(mat);
+    n = [floor(n(1) / nx), floor(n(2) / ny)];
+    result = zeros(n(1), n(2));
+    mx = ((1:n(1)) - 1) * nx + 1;
+    my = ((1:n(2)) - 1) * ny + 1;
+
+    for i = 0:nx - 1
+
+        for j = 0:ny - 1
+            result = result + mat(mx + i, my + j);
+        end
+
     end
 
 end

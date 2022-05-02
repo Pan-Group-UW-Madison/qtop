@@ -2,54 +2,65 @@ clear all;
 close all;
 clc;
 
-figure;
-set(gcf, 'position', [200, 200, 600, 200])
-
-nelx = 120;
+nelx = 40;
 nely = 40;
-rmin = 2;
-volfrac0 = 0.5;
+nelz = 5;
+rmin = 1.4;
+volfrac0 = 0.3;
 volfrac = 1.0;
 %% MATERIAL PROPERTIES
-E0 = 1;
-Emin = 1e-9;
-nu = 0.3;
-%% PREPARE FINITE ELEMENT ANALYSIS
-A11 = [12 3 -6 -3; 3 12 3 0; -6 3 12 -3; -3 0 -3 12];
-A12 = [-6 -3 0 3; -3 -6 -3 -6; 0 -3 -6 3; 3 -6 3 -6];
-B11 = [-4 3 -2 9; 3 -4 -9 4; -2 -9 -4 -3; 9 4 -3 -4];
-B12 = [2 -3 4 -9; -3 2 9 -2; 4 9 2 3; -9 -2 3 2];
-KE = 1 / (1 - nu^2) / 24 * ([A11 A12; A12' A11] + nu * [B11 B12; B12' B11]);
-nodenrs = reshape(1:(1 + nelx) * (1 + nely), 1 + nely, 1 + nelx);
-edofVec = reshape(2 * nodenrs(1:end - 1, 1:end - 1) + 1, nelx * nely, 1);
-edofMat = repmat(edofVec, 1, 8) + repmat([0 1 2 * nely + [2 3 0 1] -2 -1], nelx * nely, 1);
-iK = reshape(kron(edofMat, ones(8, 1))', 64 * nelx * nely, 1);
-jK = reshape(kron(edofMat, ones(1, 8))', 64 * nelx * nely, 1);
-% DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
-F = sparse(2, 1, -1, 2 * (nely + 1) * (nelx + 1), 1);
-U = zeros(2 * (nely + 1) * (nelx + 1), 1);
-fixeddofs = union([1:2:2 * (nely + 1)], [2 * (nelx + 1) * (nely + 1)]);
-alldofs = [1:2 * (nely + 1) * (nelx + 1)];
-freedofs = setdiff(alldofs, fixeddofs);
-%% PREPARE FILTER
-iH = ones(nelx * nely * (2 * (ceil(rmin) - 1) + 1)^2, 1);
+k0 = 1; % Good thermal conductivity
+kmin = 1e-3; % Poor thermal conductivity
+% USER-DEFINED SUPPORT FIXED DOFs
+il = nelx / 2 - nelx / 20:nelx / 2 + nelx / 20; jl = nely; kl = 0:nelz;
+fixedxy = il * (nely + 1) + (nely + 1 - jl);
+fixednid = repmat(fixedxy', size(kl)) + ...
+    repmat(kl * (nelx + 1) * (nely + 1), size(fixedxy, 2), 1);
+fixeddof = reshape(fixednid, [], 1);
+% PREPARE FINITE ELEMENT ANALYSIS
+nele = nelx * nely * nelz;
+ndof = (nelx + 1) * (nely + 1) * (nelz + 1);
+F = sparse(1:ndof, 1, -0.01, ndof, 1);
+U = zeros(ndof, 1);
+freedofs = setdiff(1:ndof, fixeddof);
+KE = lk_H8(k0);
+nodegrd = reshape(1:(nely + 1) * (nelx + 1), nely + 1, nelx + 1);
+nodeids = reshape(nodegrd(1:end - 1, 1:end - 1), nely * nelx, 1);
+nodeidz = 0:(nely + 1) * (nelx + 1):(nelz - 1) * (nely + 1) * (nelx + 1);
+nodeids = repmat(nodeids, size(nodeidz)) + repmat(nodeidz, size(nodeids));
+edofVec = nodeids(:) + 1;
+edofMat = repmat(edofVec, 1, 8) + ...
+    repmat([0 nely + [1 0] -1 ...
+                (nely + 1) * (nelx + 1) + [0 nely + [1 0] -1]], nele, 1);
+iK = reshape(kron(edofMat, ones(8, 1))', 8 * 8 * nele, 1);
+jK = reshape(kron(edofMat, ones(1, 8))', 8 * 8 * nele, 1);
+% PREPARE FILTER
+iH = ones(nele * (2 * (ceil(rmin) - 1) + 1)^2, 1);
 jH = ones(size(iH));
 sH = zeros(size(iH));
 k = 0;
 
-for i1 = 1:nelx
+for k1 = 1:nelz
 
-    for j1 = 1:nely
-        e1 = (i1 - 1) * nely + j1;
+    for i1 = 1:nelx
 
-        for i2 = max(i1 - (ceil(rmin) - 1), 1):min(i1 + (ceil(rmin) - 1), nelx)
+        for j1 = 1:nely
+            e1 = (k1 - 1) * nelx * nely + (i1 - 1) * nely + j1;
 
-            for j2 = max(j1 - (ceil(rmin) - 1), 1):min(j1 + (ceil(rmin) - 1), nely)
-                e2 = (i2 - 1) * nely + j2;
-                k = k + 1;
-                iH(k) = e1;
-                jH(k) = e2;
-                sH(k) = max(0, rmin - sqrt((i1 - i2)^2 + (j1 - j2)^2));
+            for k2 = max(k1 - (ceil(rmin) - 1), 1):min(k1 + (ceil(rmin) - 1), nelz)
+
+                for i2 = max(i1 - (ceil(rmin) - 1), 1):min(i1 + (ceil(rmin) - 1), nelx)
+
+                    for j2 = max(j1 - (ceil(rmin) - 1), 1):min(j1 + (ceil(rmin) - 1), nely)
+                        e2 = (k2 - 1) * nelx * nely + (i2 - 1) * nely + j2;
+                        k = k + 1;
+                        iH(k) = e1;
+                        jH(k) = e2;
+                        sH(k) = max(0, rmin - sqrt((i1 - i2)^2 + (j1 - j2)^2 + (k1 - k2)^2));
+                    end
+
+                end
+
             end
 
         end
@@ -61,10 +72,10 @@ end
 H = sparse(iH, jH, sH);
 Hs = sum(H, 2);
 %% INITIALIZE ITERATION
-x = ones(nely, nelx);
+x = ones(nely, nelx, nelz);
 loop = 0;
 
-dvol = 100;
+dvol = 200;
 stage = 1;
 totalLoop = 0;
 epsilon = 1e-2;
@@ -80,18 +91,15 @@ while stage < 3
     Upper = 1e9;
 
     if stage == 1
-        vol = floor(volfrac * nelx * nely);
+        vol = floor(volfrac * nelx * nely * nelz);
         vol = vol - dvol;
-        vol = max(vol, volfrac0 * nelx * nely);
-        volfrac = vol / (nelx * nely);
+        volfrac = vol / (nelx * nely * nelz);
     end
 
     if stage == 2
-        vol = floor(volfrac0 * nelx * nely);
+        vol = floor(volfrac0 * nelx * nely * nelz);
         epsilon = 1e-5;
     end
-
-    colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
     innerLoop = 0;
     exitFlag = 1;
@@ -106,32 +114,33 @@ while stage < 3
 
     % prepare the intitial solution
     xPhys = x;
-    sK = reshape(KE(:) * (Emin + xPhys(:)' * (E0 - Emin)), 64 * nelx * nely, 1);
+    sK = reshape(KE(:) * (kmin + (1 - kmin) * xPhys(:)'), 8 * 8 * nele, 1);
     K = sparse(iK, jK, sK); K = (K + K') / 2;
-    U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
-    ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
-    c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
+    U(freedofs, :) = K(freedofs, freedofs) \ F(freedofs, :);
+    % OBJECTIVE FUNCTION AND SENSITIVITY ANALYSIS
+    ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), [nely, nelx, nelz]);
+    c = sum(sum(sum((kmin + (1 - kmin) * xPhys) .* ce)));
     ce(:) = ce .* x;
     ce(:) = H * (ce(:) ./ Hs);
 
     [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    %     [xResult, cost, exitFlag] = gbdMasterCutRelaxed(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    % [xResult, cost, exitFlag] = gbdMasterCutQuantum(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
 
-    x = reshape(xResult, size(x, 1), size(x, 2));
+    x = reshape(xResult, size(x, 1), size(x, 2), size(x, 3));
     xOptimal = x;
-
-    %     subplot(2, 1, 2);
-    colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
     while (1)
         innerLoop = innerLoop + 1;
 
         % primal problem
         xPhys = x;
-        sK = reshape(KE(:) * (Emin + xPhys(:)' * (E0 - Emin)), 64 * nelx * nely, 1);
+        sK = reshape(KE(:) * (kmin + (1 - kmin) * xPhys(:)'), 8 * 8 * nele, 1);
         K = sparse(iK, jK, sK); K = (K + K') / 2;
-        U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
-        ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
-        c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
+        U(freedofs, :) = K(freedofs, freedofs) \ F(freedofs, :);
+        % OBJECTIVE FUNCTION AND SENSITIVITY ANALYSIS
+        ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), [nely, nelx, nelz]);
+        c = sum(sum(sum((kmin + (1 - kmin) * xPhys) .* ce)));
         ce(:) = ce .* x;
         ce(:) = H * (ce(:) ./ Hs);
 
@@ -139,6 +148,9 @@ while stage < 3
             xOptimal = x;
             Upper = c;
         end
+
+        compliance = [compliance; Upper];
+        volume = [volume; vol];
 
         % check feasibility
         if norm(U) > 1e9
@@ -167,29 +179,20 @@ while stage < 3
         end
 
         % master problem
+        % if stage == 1
         [xResult, cost, exitFlag] = gbdMasterCut(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        %         [xResult, cost, exitFlag] = gbdMasterCutRelaxed(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        % else
+        %     [xResult, cost, exitFlag] = gbdMasterCutQuantum(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        % end
 
-        if exitFlag == 1
-            x = reshape(xResult, size(x, 1), size(x, 2));
-        else
-            break;
-        end
-
-        colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
-
-        if cost > Upper || (Upper - cost) / Upper < epsilon
-            compliance = [compliance; Upper];
-            volume = [volume; vol];
-
-            fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%\n', loop, Upper, sum(x(:)), (Upper - cost) / Upper * 100);
-
-            break;
-        end
-
-        compliance = [compliance; Upper];
-        volume = [volume; vol];
+        x = reshape(xResult, size(x, 1), size(x, 2), size(x, 3));
 
         fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%\n', loop, Upper, sum(x(:)), (Upper - cost) / Upper * 100);
+
+        if cost > Upper || (Upper - cost) / Upper < epsilon
+            break;
+        end
 
     end
 
@@ -205,6 +208,8 @@ while stage < 3
 
 end
 
+display_3D(xPhys);
+
 disp(numFeasibleCut)
 disp(Upper)
 disp(totalLoop)
@@ -214,9 +219,7 @@ hold on;
 yyaxis left
 plot(compliance, 'b.-');
 yyaxis right
-plot(volume ./ (nelx * nely), 'r.-');
-
-save('gbd_history_dvol200', 'compliance');
+plot(volume ./ (nelx * nely * nelz), 'r.-');
 
 function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
     n = size(y, 2);
@@ -229,8 +232,8 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
     ub = ones(1, l + 1);
     ub(1) = inf;
 
-    A = zeros(n + m + 1, l + 1);
-    b = zeros(n + m + 1, 1);
+    A = zeros(n + m, l + 1);
+    b = zeros(n + m, 1);
 
     for i = 1:n
         A(i, 1) = -1;
@@ -246,16 +249,12 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
     intcon = 1:l;
     intcon = intcon + 1;
 
-    A(end, :) = ones(1, l + 1);
-    A(end, 1) = 0;
-    b(end) = vol;
-
-    % Aeq = ones(1, l + 1);
-    % Aeq(1, 1) = 0;
-    % beq = vol;
+    Aeq = ones(1, l + 1);
+    Aeq(1, 1) = 0;
+    beq = vol;
 
     %     options = optimoptions('intlinprog','IntegerPreprocess','none');
-    [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, [], [], lb, ub);
+    [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, Aeq, beq, lb, ub);
 
     if exitFlag ~= 1
         x = y;
@@ -263,6 +262,14 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
         x = x(2:end);
     end
 
+end
+
+function [KE] = lk_H8(k)
+    A1 = 4 * eye(2); A2 = -eye(2);
+    A3 = fliplr(A2); A4 = -ones(2);
+    KE1 = [A1 A2; A2 A1];
+    KE2 = [A3 A4; A4 A3];
+    KE = 1/12 * k * [KE1 KE2; KE2 KE1];
 end
 
 function [x, objFunc, exitFlag] = gbdMasterCutRelaxed(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
@@ -348,4 +355,35 @@ function lambda = feasibilityCut(K, f, UB)
         ceq = [];
     end
 
+end
+
+function display_3D(rho)
+    [nely, nelx, nelz] = size(rho);
+    hx = 1; hy = 1; hz = 1; % User-defined unit element size
+    face = [1 2 3 4; 2 6 7 3; 4 3 7 8; 1 5 8 4; 1 2 6 5; 5 6 7 8];
+    set(gcf, 'Name', 'ISO display', 'NumberTitle', 'off');
+
+    for k = 1:nelz
+        z = (k - 1) * hz;
+
+        for i = 1:nelx
+            x = (i - 1) * hx;
+
+            for j = 1:nely
+                y = nely * hy - (j - 1) * hy;
+
+                if (rho(j, i, k) > 0.5) % User-defined display density threshold
+                    vert = [x y z; x y - hx z; x + hx y - hx z; x + hx y z; x y z + hx; x y - hx z + hx; x + hx y - hx z + hx; x + hx y z + hx];
+                    vert(:, [2 3]) = vert(:, [3 2]); vert(:, 2, :) = -vert(:, 2, :);
+                    patch('Faces', face, 'Vertices', vert, 'FaceColor', [0.2 + 0.8 * (1 - rho(j, i, k)), 0.2 + 0.8 * (1 - rho(j, i, k)), 0.2 + 0.8 * (1 - rho(j, i, k))]);
+                    hold on;
+                end
+
+            end
+
+        end
+
+    end
+
+    axis equal; axis tight; axis off; box on; view([30, 30]); pause(1e-6);
 end

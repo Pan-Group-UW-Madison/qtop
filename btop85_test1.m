@@ -1,5 +1,5 @@
 % AN 85 LINE CODE FOR TOPOLOGY OPTIMIZATION with B-SPLINES. Xiaoping Qian %%%
-function btop85(nelx, nely, volfrac, penal, n_mu, n_mv, mp, mq)
+function btop85_test1(nelx, nely, volfrac, penal, n_mu, n_mv, mp, mq)
     % figure;
     % set(gcf,'position',[200,200,600,200])
     optTime = 0;
@@ -42,10 +42,11 @@ function btop85(nelx, nely, volfrac, penal, n_mu, n_mv, mp, mq)
     iK = reshape(kron(edofMat, ones(8, 1))', 64 * nelx * nely, 1);
     jK = reshape(kron(edofMat, ones(1, 8))', 64 * nelx * nely, 1);
     % DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
-    F = sparse(2, 1, -1, 2 * (nely + 1) * (nelx + 1), 1);
+    F = sparse(2 * (nely + 1) * (nelx + 1), 1);
     U = zeros(2 * (nely + 1) * (nelx + 1), 1);
-    fixeddofs = union([1:2:2 * (nely + 1)], [2 * (nelx + 1) * (nely + 1)]);
-    alldofs = [1:2 * (nely + 1) * (nelx + 1)];
+    F((nely + 1) * (nelx) * 2 + nely + 2 * (-round(nely / 32) + 1):2:(nely + 1) * (nelx) * 2 + nely + 2 * (round(nely / 32) + 1), 1) = 1;
+    fixeddofs = 1:2 * (nely + 1);
+    alldofs = 1:2 * (nely + 1) * (nelx + 1);
     freedofs = setdiff(alldofs, fixeddofs);
     %% INITIALIZE ITERATION
     x = ones(ncp_u * ncp_v, 1) * volfrac;
@@ -98,7 +99,7 @@ function btop85(nelx, nely, volfrac, penal, n_mu, n_mv, mp, mq)
     totalTime = toc(t1);
     disp(['total time: ', num2str(totalTime), 's']);
     disp(['optimization time: ', num2str(optTime), 's']);
-    colormap(gray); imagesc(1-xPhys); caxis([0 1]); axis equal; axis off; drawnow;
+    colormap(gray); imagesc(1 - xPhys); caxis([0 1]); axis equal; axis off; drawnow;
     %%%%% B-spline basis from recursive definition %%%%%%%%%%%%%%%%%%%%%%%%%%%%
     function [base] = getUniformBsplineBasis(p, t)
         base = 1; z = 0;
