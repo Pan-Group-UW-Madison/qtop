@@ -9,7 +9,9 @@ averageTotalTime = 0;
 averageOptTime1 = 0;
 averageOptTime2 = 0;
 
-for iter = 1:1
+iterMax = 1;
+
+for iter = 1:iterMax
 optTime1 = 0;
 optTime2 = 0;
 optIter1 = 0;
@@ -17,8 +19,8 @@ optIter2 = 0;
 
 t1 = tic;
 
-nelx = 30;
-nely = 10;
+nelx = 300;
+nely = 100;
 rmin = 1.4;
 volfrac0 = 0.5;
 volfrac = 1.0;
@@ -76,7 +78,7 @@ Hs = sum(H, 2);
 x = ones(nely, nelx);
 loop = 0;
 
-dvol = 10;
+dvol = 800;
 stage = 1;
 totalLoop = 0;
 femAnalysis = 0;
@@ -120,14 +122,14 @@ while stage < 3
     U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
     ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
     c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
-    ce(x<1e-3) = 3*ce(x<1e-3)*Emin^2;
+    ce(x<1e-3) = ce(x<1e-3)*Emin^2;
 %     ce(:) = ce .* x;
     ce(:) = H * (ce(:) ./ Hs);
     femAnalysis = femAnalysis + 1;
 
     tOpt1 = tic;
-%     [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
-    [xResult, cost, exitFlag] = gbdMasterCutPython(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+%     [xResult, cost, exitFlag] = gbdMasterCutPython(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
     optTime2 = optTime2 + toc(tOpt1);
     optIter2 = optIter2 + 1;
 
@@ -135,7 +137,7 @@ while stage < 3
     xOptimal = x;
 
     %         subplot(2, 1, 2);
-        colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+%         colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
     while (1)
         innerLoop = innerLoop + 1;
@@ -148,7 +150,7 @@ while stage < 3
         U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
         ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
         c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
-        ce(x<1e-3) = 3*ce(x<1e-3)*Emin^2;
+        ce(x<1e-3) = ce(x<1e-3)*Emin^2;
 %         ce(:) = ce .* x;
         ce(:) = H * (ce(:) ./ Hs);
         femAnalysis = femAnalysis + 1;
@@ -185,8 +187,8 @@ while stage < 3
 
         % master problem
         tOpt1 = tic;
-%         [xResult, cost, exitFlag] = gbdMasterCut(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
-        [xResult, cost, exitFlag] = gbdMasterCutPython(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        [xResult, cost, exitFlag] = gbdMasterCut(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+%         [xResult, cost, exitFlag] = gbdMasterCutPython(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
         tOp2 = toc(tOpt1);
 
         if length(index) > 1
@@ -206,7 +208,7 @@ while stage < 3
         %         subplot(2, 1, 1);
         %                 colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
         %         subplot(2, 1, 2);
-                        colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+%                         colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
         if cost > Upper || (Upper - cost) / Upper < epsilon
             fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%\n', loop, Upper, sum(x(:)), (Upper - cost) / Upper * 100);
@@ -236,11 +238,12 @@ averageOptTime2 = averageOptTime2 + optTime2;
 
 end
 
-averageTotalTime = averageTotalTime / 10;
-averageOptTime1 = averageOptTime1 / 10;
-averageOptTime2 = averageOptTime2 / 10;
+averageTotalTime = averageTotalTime / iterMax;
+averageOptTime1 = averageOptTime1 / iterMax;
+averageOptTime2 = averageOptTime2 / iterMax;
 
 disp(['total time: ', num2str(averageTotalTime), 's']);
+disp(['optimization time: ', num2str(averageOptTime1 + averageOptTime2), 's']);
 disp(['multiconstraint optimization time: ', num2str(averageOptTime1), 's, with # of iterations: ', num2str(optIter1)]);
 disp(['single constraint optimization time: ', num2str(averageOptTime2), 's, with # of iterations: ', num2str(optIter2)]);
 

@@ -4,15 +4,17 @@ clc;
 
 figure;
 set(gcf, 'position', [200, 200, 600, 600]);
+optTime = 0;
+t1 = tic;
 
-nelx = 40;
-nely = 40;
-rmin = 1.4;
+nelx = 150;
+nely = 150;
+rmin = 2;
 volfrac0 = 0.5;
 volfrac = 1.0;
 %% MATERIAL PROPERTIES
-k0 = 0.95; % good thermal conductivity
-kmin = 0.05; % poor thermal conductivity
+k0 = 1.0; % good thermal conductivity
+kmin = 5e-3; % poor thermal conductivity
 %% PREPARE FINITE ELEMENT ANALYSIS
 KE = [2/3 -1/6 -1/3 -1/6
     -1/6 2/3 -1/6 -1/3
@@ -24,11 +26,12 @@ edofMat = repmat(edofVec, 1, 4) + repmat([0 nely + [1 0] -1], nelx * nely, 1);
 iK = reshape(kron(edofMat, ones(4, 1))', 16 * nelx * nely, 1);
 jK = reshape(kron(edofMat, ones(1, 4))', 16 * nelx * nely, 1);
 % DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
-F = sparse(1:(nelx + 1) * (nely + 1), 1, 0.01, (nelx + 1) * (nely + 1), 1);
-% F = sparse(ceil((nelx+1)*(nely+1)/2), 1, 1, (nelx + 1) * (nely + 1), 1);
+F = sparse(1:(nelx + 1) * (nely + 1), 1, 1 / nelx / nely, (nelx + 1) * (nely + 1), 1);
 U = zeros((nely + 1) * (nelx + 1), 1);
 fixeddofs = nely / 2 + 1 - floor(nely / 20):nely / 2 + 1 + floor(nely / 20);
-% fixeddofs = 1:nely+1;
+x = ones(nely, nelx);
+sK = reshape(KE(:) * (x(:)'), 16 * nelx * nely, 1);
+K = sparse(iK, jK, sK); K = (K + K') / 2;
 alldofs = 1:(nely + 1) * (nelx + 1);
 freedofs = setdiff(alldofs, fixeddofs);
 %% PREPARE FILTER
@@ -64,7 +67,7 @@ Hs = sum(H, 2);
 loop = 0;
 x = ones(nely, nelx);
 
-dvol = 100;
+dvol = 400;
 stage = 1;
 totalLoop = 0;
 epsilon = 1e-7;
@@ -76,6 +79,32 @@ volume = [];
 
 % stage = 2;
 % load('x_thermal');
+% 
+% xPhys = x;
+% 
+% level = 0.5;
+% levelHigh = 1;
+% levelLow = kmin;
+% while (true)
+%     x = xPhys;
+%     x(xPhys>=level) = 1;
+%     x(xPhys<level) = kmin;
+%     if (abs(sum(sum(x)) / (nely * nelx) - volfrac0) < (1/nely/nelx))
+%         break;
+%     else
+%         if sum(sum(x)) / (nely * nelx) < volfrac0
+%             levelHigh = level;
+%             level = 0.5 * (levelLow + levelHigh);
+%         else
+%             levelLow = level;
+%             level = 0.5 * (levelLow + levelHigh);
+%         end
+%     end
+% end
+
+% 
+% x(x>=0.5) = 1;
+% x(x<0.5) = 0;
 
 % colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
@@ -119,22 +148,20 @@ while stage < 3
     U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
     ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
     ce(:) = ce .* xPhys.^2;
-    %     [ce] = check(nelx, nely, rmin, xPhys, ce);
-    %     ce = ce.*x;
+%     ce(:) = ce .* x;
     c = F' * U;
-    disp(c);
-    %     ce(:) = ce .* xPhys;
-    ce(:) = H * (ce(:) ./ Hs);
+    if stage == 2
+        ce(:) = H * (ce(:) ./ Hs);
+    end
 
+    optTimer1 = tic;
     [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
-    %         [xResult, cost, exitFlag] = gbdMasterCutRelaxed(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
-    % [xResult, cost, exitFlag] = gbdMasterCutQuantum(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    optTime = optTime + toc(optTimer1);
 
     x = reshape(xResult, size(x, 1), size(x, 2));
     xOptimal = x;
 
-    %     subplot(2, 1, 2);
-    colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+%     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
     while (1)
         innerLoop = innerLoop + 1;
@@ -143,20 +170,16 @@ while stage < 3
         xPhys = x;
         xPhys(x < 1e-3) = kmin;
         xPhys(x > 1e-3) = k0;
-        %         xPhys = reshape(H * (x(:) ./ Hs), nely, nelx);
-        %         xPhys(xPhys<1e-3) = kmin;
         sK = reshape(KE(:) * (xPhys(:)'), 16 * nelx * nely, 1);
         K = sparse(iK, jK, sK); K = (K + K') / 2;
         U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
-        ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
+        ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);        
         ce(:) = ce .* xPhys.^2;
-        ce(:) = H * (ce(:) ./ Hs);
-        %         ce = ce.*x;
+%         ce(:) = ce .* x;
         c = F' * U;
-        %         if stage == 1
-        %         ce(:) = ce .* xPhys;
-        %         ce(:) = H * (ce(:) ./ Hs);
-        %         end
+        if stage == 2
+            ce(:) = H * (ce(:) ./ Hs);
+        end
 
         if c < Upper
             xOptimal = x;
@@ -178,29 +201,24 @@ while stage < 3
             ceTarget = [ceTarget; reshape(ce, 1, [])];
             cTarget = [cTarget; c];
             index = [];
-            %                         index = 1:length(cTarget);
+%             index = 1:length(cTarget);
 
             for i = 1:length(cTarget)
-
                 if (cTarget(i) <= c)
                     index = [index; i];
                 end
-
             end
 
         end
 
         % master problem
-        % if stage == 1
+        optTimer1 = tic;
         [xResult, cost, exitFlag] = gbdMasterCut(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
-        %                 [xResult, cost, exitFlag] = gbdMasterCutRelaxed(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
-        % else
-        %     [xResult, cost, exitFlag] = gbdMasterCutQuantum(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
-        % end
+        optTime = optTime + toc(optTimer1);
 
         x = reshape(xResult, size(x, 1), size(x, 2));
 
-        colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
+%         colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
 
         if cost > Upper || (Upper - cost) / Upper < epsilon
             compliance = [compliance; Upper];
@@ -230,9 +248,11 @@ while stage < 3
 
 end
 
-disp(numFeasibleCut)
-disp(Upper)
-disp(totalLoop)
+totalTime = toc(t1);
+disp(['total time: ', num2str(totalTime), 's']);
+disp(['optimization time: ', num2str(optTime), 's']);
+
+colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
 figure;
 hold on;
@@ -252,47 +272,83 @@ colorbar;
 function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
     n = size(y, 2);
     m = size(yFeasible, 2);
-    l = size(y, 1);
-    f = zeros(1, l + 1);
-    f(1) = 1;
-    lb = zeros(1, l + 1);
-    lb(1) = 0;
-    ub = ones(1, l + 1);
-    ub(1) = inf;
+    if n > 1
+        l = size(y, 1);
+        f = zeros(1, l + 1);
+        f(1) = 1;
+        lb = zeros(1, l + 1);
+        lb(1) = 0;
+        ub = ones(1, l + 1);
+        ub(1) = inf;
 
-    A = zeros(n + m, l + 1);
-    b = zeros(n + m, 1);
+        A = zeros(n + m, l + 1);
+        b = zeros(n + m, 1);
 
-    for i = 1:n
-        A(i, 1) = -1;
-        A(i, 2:end) = -weight(i, :);
-        b(i) = -obj(i) + -weight(i, :) * y(:, i);
-    end
+        for i = 1:n
+            A(i, 1) = -1;
+            A(i, 2:end) = -weight(i, :);
+            b(i) = -obj(i) - weight(i, :) * y(:, i);
+        end
 
-    for i = 1:m
-        A(i + n, 2:end) = weightFeasible(i, :);
-        b(i + n) = objFeasible(i);
-    end
+        for i = 1:m
+            A(i + n, 2:end) = weightFeasible(i, :);
+            b(i + n) = objFeasible(i);
+        end
 
-    intcon = 1:l;
-    intcon = intcon + 1;
+        intcon = 1:l;
+        intcon = intcon + 1;
+        
+%         A(end, :) = ones(1, l+1);
+%         A(end, 1) = 0;
+%         b(end) = vol;
 
-    %     A(end, :) = ones(1, l + 1);
-    %     A(end, 1) = 0;
-    %     b(end) = vol;
+        Aeq = ones(1, l + 1);
+        Aeq(1, 1) = 0;
+        beq = vol;
 
-    Aeq = ones(1, l + 1);
-    Aeq(1, 1) = 0;
-    beq = vol;
+        [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, Aeq, beq, lb, ub);
 
-    options = optimoptions('intlinprog', 'RelativeGapTolerance', 5e-1);
-    [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, Aeq, beq, lb, ub, [], options);
-    %     [x, objFunc, exitFlag, ~] = linprog(f, A, b, [], [], lb, ub);
-
-    if exitFlag ~= 1
-        x = y;
-    else
         x = x(2:end);
+
+    else
+        l = size(y, 1);
+        xOptimal = y(:, 1);
+        objOptimal = inf;
+
+        f = -weight(1, :);
+        lb = zeros(1, l);
+        ub = ones(1, l);
+
+        intcon = 1:l;
+
+        Aeq = ones(1, l);
+        beq = vol;
+
+%         options = optimoptions('intlinprog','IntegerPreprocess','none');
+        [x, ~, exitFlag, ~] = intlinprog(f, intcon, [], [], Aeq, beq, lb, ub);
+        %         [x, ~, exitFlag, ~] = linprog(f, [], [], Aeq, beq, lb, ub);
+
+        if exitFlag == 1
+            objFunc = -inf;
+
+            for j = 1:n
+                objSelect = obj(j) - weight(j, :) * (x - y(:, j));
+
+                if objSelect > objFunc
+                    objFunc = objSelect;
+                end
+
+            end
+
+            if objFunc < objOptimal
+                xOptimal = x;
+                objOptimal = objFunc;
+            end
+
+        end
+
+        x = xOptimal;
+        objFunc = objOptimal;
     end
 
 end

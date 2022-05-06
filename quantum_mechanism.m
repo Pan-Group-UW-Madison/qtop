@@ -5,14 +5,14 @@ clc;
 figure;
 set(gcf, 'position', [200, 200, 400, 200])
 
-nelx = 40;
-nely = 20;
+nelx = 80;
+nely = 40;
 rmin = 2;
 volfrac0 = 0.3;
 volfrac = 1.0;
 %% MATERIAL PROPERTIES
 E0 = 1;
-Emin = 0.5;
+Emin = 1e-6;
 nu = 0.3;
 %% PREPARE FINITE ELEMENT ANALYSIS
 A11 = [12 3 -6 -3; 3 12 3 0; -6 3 12 -3; -3 0 -3 12];
@@ -25,7 +25,6 @@ edofVec = reshape(2 * nodenrs(1:end - 1, 1:end - 1) + 1, nelx * nely, 1);
 edofMat = repmat(edofVec, 1, 8) + repmat([0 1 2 * nely + [2 3 0 1] -2 -1], nelx * nely, 1);
 iK = reshape(kron(edofMat, ones(8, 1))', 64 * nelx * nely, 1);
 jK = reshape(kron(edofMat, ones(1, 8))', 64 * nelx * nely, 1);
-% DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
 
 din = 1;
 dout = 2 * nelx * (nely + 1) + 1;
@@ -70,7 +69,7 @@ Hs = sum(H, 2);
 x = ones(nely, nelx);
 loop = 0;
 
-dvol = 50;
+dvol = 40;
 stage = 1;
 totalLoop = 0;
 epsilon = 1e-3;
@@ -100,7 +99,7 @@ while stage < 3
     %     x(xPhys<0.5) = 0;
 
     %     subplot(2, 1, 1);
-    colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+%     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
     innerLoop = 0;
     exitFlag = 1;
@@ -114,48 +113,38 @@ while stage < 3
     cFeasible = [];
 
     % prepare the intitial solution
-    %     xPhys = x;
-    %     sK = reshape(KE(:)*(Emin+xPhys(:)'*(E0-Emin)),64*nelx*nely,1);
-    %     K = sparse(iK,jK,sK); K = (K+K')/2;
-    %     K(din, din) = K(din,din) +0.1;
-    %     K(dout, dout) = K(dout,dout) +0.1;
-    %     U(freedofs,:) = K(freedofs,freedofs)\F(freedofs,:);
-    %     U(fixeddofs,:)= 0;
-    %     ce=zeros(nely, nelx);
-    %     for ely = 1:nely
-    %         for elx = 1:nelx
-    %           n1 = (nely+1)*(elx-1)+ely;
-    %           n2 = (nely+1)* elx   +ely;
-    %           Ue1 = U([2*n1-1;2*n1; 2*n2-1;2*n2; 2*n2+1;2*n2+2; 2*n1+1;2*n1+2],1);
-    %           Ue2 = U([2*n1-1;2*n1; 2*n2-1;2*n2; 2*n2+1;2*n2+2; 2*n1+1;2*n1+2],2);
-    %           ce(ely,elx) = x(ely,elx)*Ue1'*KE*Ue2;
-    %         end
-    %     end
-    %     c = U(dout, 2);
-    %     ce(:) = ce.*x;
-    %     ce(:) = H*(ce(:)./Hs);
-
     xPhys = x;
     xPhys(xPhys < 1e-3) = Emin;
-    [U, c] = FE(nelx, nely, xPhys, 1.0);
+    [U, c] = FE(nelx, nely, xPhys, 3.0);
     [KE] = lk;
     ce = zeros(nely, nelx);
+
+    din = 1;
+    dout = 2 * nelx * (nely + 1) + 1;
 
     for ely = 1:nely
 
         for elx = 1:nelx
-            n1 = (nely + 1) * (elx - 1) + ely;
-            n2 = (nely + 1) * elx +ely;
-            Ue1 = U([2 * n1 - 1; 2 * n1; 2 * n2 - 1; 2 * n2; 2 * n2 + 1; 2 * n2 + 2; 2 * n1 + 1; 2 * n1 + 2], 1);
-            Ue2 = U([2 * n1 - 1; 2 * n1; 2 * n2 - 1; 2 * n2; 2 * n2 + 1; 2 * n2 + 2; 2 * n1 + 1; 2 * n1 + 2], 2);
-            ce(ely, elx) =- Ue1' * KE * Ue2;
+            n1 = (nely+1)*(elx-1)+ely; 
+            n2 = (nely+1)* elx   +ely;
+            Ue1 = U([2*n1-1;2*n1; 2*n2-1;2*n2; 2*n2+1;2*n2+2; 2*n1+1;2*n1+2],1);
+            Ue2 = U([2*n1-1;2*n1; 2*n2-1;2*n2; 2*n2+1;2*n2+2; 2*n1+1;2*n1+2],2);
+            Ke = KE;
+            n = [2 * n1 - 1; 2 * n1; 2 * n2 - 1; 2 * n2; 2 * n2 + 1; 2 * n2 + 2; 2 * n1 + 1; 2 * n1 + 2];
+            for i = 1:8
+                if (n(i) == din)
+                    Ke(i, i) = Ke(i, i) + 0.1;
+                end
+                if (n(i) == dout)
+                    Ke(i, i) = Ke(i, i) + 0.1;
+                end
+            end
+            ce(ely, elx) = Ue1' * Ke * Ue1;
         end
 
     end
 
-    %     ce(:) = 3 * ce .* x.^2;
-    %     ce(x<1e-3) = ce(x<1e-3)*Emin^2;
-    ce(:) = H * (ce(:) ./ Hs);
+    ce(:) = ce .* xPhys.^2;
 
     [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
 
@@ -163,33 +152,12 @@ while stage < 3
     xOptimal = x;
 
     %     subplot(2, 1, 2);
-    colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+%     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
     while (1)
         innerLoop = innerLoop + 1;
 
         % primal problem
-        %         xPhys = x;
-        %         sK = reshape(KE(:)*(Emin+xPhys(:)'*(E0-Emin)),64*nelx*nely,1);
-        %         K = sparse(iK,jK,sK); K = (K+K')/2;
-        %         K(din, din) = K(din,din) +0.1;
-        %         K(dout, dout) = K(dout,dout) +0.1;
-        %         U(freedofs,:) = K(freedofs,freedofs)\F(freedofs,:);
-        %         U(fixeddofs,:)= 0;
-        %         ce=zeros(nely, nelx);
-        %         for ely = 1:nely
-        %             for elx = 1:nelx
-        %               n1 = (nely+1)*(elx-1)+ely;
-        %               n2 = (nely+1)* elx   +ely;
-        %               Ue1 = U([2*n1-1;2*n1; 2*n2-1;2*n2; 2*n2+1;2*n2+2; 2*n1+1;2*n1+2],1);
-        %               Ue2 = U([2*n1-1;2*n1; 2*n2-1;2*n2; 2*n2+1;2*n2+2; 2*n1+1;2*n1+2],2);
-        %               ce(ely,elx) = x(ely,elx)*Ue1'*KE*Ue2;
-        %             end
-        %         end
-        %         c = U(dout, 2);
-        %         ce(:) = ce.*x;
-        %         ce(:) = H*(ce(:)./Hs);
-
         xPhys = x;
         xPhys(xPhys < 1e-3) = Emin;
         [U, c] = FE(nelx, nely, xPhys, 1.0);
@@ -203,13 +171,22 @@ while stage < 3
                 n2 = (nely + 1) * elx +ely;
                 Ue1 = U([2 * n1 - 1; 2 * n1; 2 * n2 - 1; 2 * n2; 2 * n2 + 1; 2 * n2 + 2; 2 * n1 + 1; 2 * n1 + 2], 1);
                 Ue2 = U([2 * n1 - 1; 2 * n1; 2 * n2 - 1; 2 * n2; 2 * n2 + 1; 2 * n2 + 2; 2 * n1 + 1; 2 * n1 + 2], 2);
-                ce(ely, elx) =- Ue1' * KE * Ue2;
+                Ke = KE;
+                n = [2 * n1 - 1; 2 * n1; 2 * n2 - 1; 2 * n2; 2 * n2 + 1; 2 * n2 + 2; 2 * n1 + 1; 2 * n1 + 2];
+%                 for i = 1:8
+%                     if (n(i) == din)
+%                         Ke(i, i) = Ke(i, i) + 0.1;
+%                     end
+%                     if (n(i) == dout)
+%                         Ke(i, i) = Ke(i, i) + 0.1;
+%                     end
+%                 end
+                ce(ely, elx) = Ue1' * Ke * Ue1;
             end
 
         end
 
-        %         ce(x<1e-3) = ce(x<1e-3)*Emin^2;
-        ce(:) = H * (ce(:) ./ Hs);
+        ce(:) = ce .* xPhys.^2;
 
         if c < Upper
             xOptimal = x;
@@ -249,15 +226,8 @@ while stage < 3
         else
             break;
         end
-        
-%         xPhys = x;
-%         xPhys(xPhys < 1e-3) = Emin;
-%         [U, cost] = FE(nelx, nely, xPhys, 1.0);
 
-        %         subplot(2, 1, 1);
         colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
-        %         subplot(2, 1, 2);
-        %         colormap(gray); imagesc(1-x); caxis([0 1]); axis equal; axis off; drawnow;
         fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%\n', loop, Upper, sum(x(:)), (Upper - cost) / abs(Upper) * 100);
 
         if cost > Upper || (Upper - cost) / abs(Upper) < epsilon
@@ -278,47 +248,84 @@ while stage < 3
 
 end
 
+colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+
 function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
     n = size(y, 2);
     m = size(yFeasible, 2);
-    l = size(y, 1);
-    f = zeros(1, l + 1);
-    f(1) = 1;
-    lb = zeros(1, l + 1);
-    lb(1) = -inf;
-    lb(2) = 1;
-    lb(1 + 20 * 39 + 1) = 1;
-    ub = ones(1, l + 1);
-    ub(1) = inf;
+    if n > 1
+        l = size(y, 1);
+        f = zeros(1, l + 1);
+        f(1) = 1;
+        lb = zeros(1, l + 1);
+        lb(1) = -inf;
+        ub = ones(1, l + 1);
+        ub(1) = inf;
 
-    A = zeros(n + m, l + 1);
-    b = zeros(n + m, 1);
+        A = zeros(n + m, l + 1);
+        b = zeros(n + m, 1);
 
-    for i = 1:n
-        A(i, 1) = -1;
-        A(i, 2:end) = -weight(i, :);
-        b(i) = -obj(i) - weight(i, :) * y(:, i);
-    end
+        for i = 1:n
+            A(i, 1) = -1;
+            A(i, 2:end) = -weight(i, :);
+            b(i) = -obj(i) - weight(i, :) * y(:, i);
+        end
 
-    for i = 1:m
-        A(i + n, 2:end) = weightFeasible(i, :);
-        b(i + n) = objFeasible(i);
-    end
+        for i = 1:m
+            A(i + n, 2:end) = weightFeasible(i, :);
+            b(i + n) = objFeasible(i);
+        end
 
-    intcon = 1:l;
-    intcon = intcon + 1;
+        intcon = 1:l;
+        intcon = intcon + 1;
 
-    Aeq = ones(1, l + 1);
-    Aeq(1, 1) = 0;
-    beq = vol;
+        Aeq = ones(1, l + 1);
+        Aeq(1, 1) = 0;
+        beq = vol;
 
-    %     options = optimoptions('intlinprog','IntegerPreprocess','none');
-    [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, Aeq, beq, lb, ub);
+        [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, Aeq, beq, lb, ub);
 
-    if exitFlag ~= 1
-        x = y;
-    else
         x = x(2:end);
+
+    else
+        l = size(y, 1);
+        xOptimal = y(:, 1);
+        objOptimal = inf;
+
+        f = -weight(1, :);
+        lb = zeros(1, l);
+        ub = ones(1, l);
+
+        intcon = 1:l;
+
+        Aeq = ones(1, l);
+        beq = vol;
+
+%         options = optimoptions('intlinprog','IntegerPreprocess','none');
+        [x, ~, exitFlag, ~] = intlinprog(f, intcon, [], [], Aeq, beq, lb, ub);
+        %         [x, ~, exitFlag, ~] = linprog(f, [], [], Aeq, beq, lb, ub);
+
+        if exitFlag == 1
+            objFunc = -inf;
+
+            for j = 1:n
+                objSelect = obj(j) - weight(j, :) * (x - y(:, j));
+
+                if objSelect > objFunc
+                    objFunc = objSelect;
+                end
+
+            end
+
+            if objFunc < objOptimal
+                xOptimal = x;
+                objOptimal = objFunc;
+            end
+
+        end
+
+        x = xOptimal;
+        objFunc = objOptimal;
     end
 
 end
@@ -365,19 +372,15 @@ end
 
 function [U, Uout] = FE(nelx, nely, x, penal)
     [KE] = lk;
-    K = sparse(2 * (nelx + 1) * (nely + 1), 2 * (nelx + 1) * (nely + 1));
     F = sparse(2 * (nely + 1) * (nelx + 1), 2); U = sparse(2 * (nely + 1) * (nelx + 1), 2);
 
-    for elx = 1:nelx
-
-        for ely = 1:nely
-            n1 = (nely + 1) * (elx - 1) + ely;
-            n2 = (nely + 1) * elx +ely;
-            edof = [2 * n1 - 1; 2 * n1; 2 * n2 - 1; 2 * n2; 2 * n2 + 1; 2 * n2 + 2; 2 * n1 + 1; 2 * n1 + 2];
-            K(edof, edof) = K(edof, edof) + (x(ely, elx)^penal + 1e-3) * KE;
-        end
-
-    end
+    nodenrs = reshape(1:(1+nelx)*(1+nely),1+nely,1+nelx);
+    edofVec = reshape(2*nodenrs(1:end-1,1:end-1)+1,nelx*nely,1);
+    edofMat = repmat(edofVec,1,8)+repmat([-2 -1 2*nely+[0 1 2 3] 0 1],nelx*nely,1);
+    iK = reshape(kron(edofMat, ones(8, 1))', 64 * nelx * nely, 1);
+    jK = reshape(kron(edofMat, ones(1, 8))', 64 * nelx * nely, 1);
+    sK = reshape(KE(:)*(x(:)'.^penal),64*nelx*nely,1);
+    K = sparse(iK, jK, sK); K = (K+K')/2;
 
     % DEFINE LOADS AND SUPPORTS (HALF FORCE INVERTER)
     din = 1;

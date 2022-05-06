@@ -11,8 +11,8 @@ rmin = 1.4;
 volfrac0 = 0.5;
 volfrac = 1.0;
 %% MATERIAL PROPERTIES
-k0 = 0.6; % good thermal conductivity
-kmin = 0.4; % poor thermal conductivity
+k0 = 1; % good thermal conductivity
+kmin = 1e-3; % poor thermal conductivity
 %% PREPARE FINITE ELEMENT ANALYSIS
 KE = [2/3 -1/6 -1/3 -1/6
     -1/6 2/3 -1/6 -1/3
@@ -280,10 +280,6 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
 
     intcon = 1:l;
     intcon = intcon + 1;
-
-    %     A(end, :) = ones(1, l + 1);
-    %     A(end, 1) = 0;
-    %     b(end) = vol;
 
     Aeq = ones(1, l + 1);
     Aeq(1, 1) = 0;

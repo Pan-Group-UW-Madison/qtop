@@ -2,14 +2,14 @@
 %%%% CODE MODIFIED FOR INCREASED SPEED, September 2002, BY OLE SIGMUND %%%
 %%%% Compliant Mechanism Design %%%%%
 % topm(40,20,0.3,3.0, 1.2)
-function topm(nelx,nely,volfrac,penal,rmin);
+function topm(nelx,nely,volfrac,penal,rmin)
 % INITIALIZE
 x(1:nely,1:nelx) = volfrac; 
 
 loop = 0; 
 change = 1.;
 % START ITERATION
-while change > 0.01  
+while change > 0.01 && loop < 100 
   loop = loop + 1;
   xold = x;
   
@@ -18,6 +18,7 @@ while change > 0.01
   
 % OBJECTIVE FUNCTION AND SENSITIVITY ANALYSIS
   [KE] = lk;
+  dc=zeros(nely, nelx);
   for ely = 1:nely
     for elx = 1:nelx
       n1 = (nely+1)*(elx-1)+ely; 
@@ -27,19 +28,6 @@ while change > 0.01
       dc(ely,elx) = penal*x(ely,elx)^(penal-1)*Ue1'*KE*Ue2;
     end
   end
-  
- % finite different for sensitivity analysis
-%  c0 = c;
-%  tx = 1; ty = 1;
-%  tdc0 = dc(ty,tx);
-%  delta = 0.001;
-%  x(ty, tx) = x(ty, tx) + delta;
-%  [U, c]=FE(nelx,nely,x,penal);  % displacement & cost function (output displcement)
-%  c1 = c;
-%  tdc = (c1-c0)/delta;
-%  tdc
-%  tdc0
-%   disp([' sensitivity difference.: ' sprintf('%7.3f',abs(tdc-tdc0))]);
   
 % FILTERING OF SENSITIVITIES
    [dc]   = check(nelx,nely,rmin,x,dc);    
@@ -52,24 +40,7 @@ while change > 0.01
        ' Vol.: ' sprintf('%6.3f',sum(sum(x))/(nelx*nely)) ...
         ' ch.: ' sprintf('%6.3f',change )])
 % % PLOT DENSITIES  
- colormap(gray); imagesc(1-x); axis equal; axis tight; axis on;pause(1e-6);
-  
-  % colormap(gray); imagesc(-x); axis equal; axis tight; axis off;pause(1e-6); 
-% colormap(gray); axis equal; 
-% for ely = 1:nely 
-%    for elx = 1:nelx 
-%      n1 = (nely+1)*(elx-1)+ely; 
-%      n2 = (nely+1)* elx +ely; 
-%      Ue = 0.005*U([2*n1-1;2*n1; 2*n2-1;2*n2; 2*n2+1;2*n2+2; 2*n1+1;2*n1+2],1); 
-%      ly = ely-1; lx = elx-1; 
-%      xx = [Ue(1,1)+lx Ue(3,1)+lx+1 Ue(5,1)+lx+1 Ue(7,1)+lx ]'; 
-%      yy = [-Ue(2,1)-ly -Ue(4,1)-ly -Ue(6,1)-ly-1 -Ue(8,1)-ly-1]'; 
-%      patch(xx,yy,-x(ely,elx)) 
-%    end 
-% end 
-% drawnow; clf; 
-
-  
+ colormap(gray); imagesc(1-x); axis equal; axis tight; axis off;pause(1e-6);  
 end
 save('xm', 'x');
 
@@ -78,7 +49,7 @@ function [xnew]=OC(nelx,nely,x,volfrac,dc)
 l1 = 0; l2 = 100000; move = 0.1;
 while (l2-l1)/(l2+l1) > 1e-4 & l2 >1e-40;
   lmid = 0.5*(l2+l1);
-  xnew = max(0.1,max(x-move,min(1.,min(x+move,x.*(max(1e-10,-dc./lmid)).^0.3))));
+  xnew = max(1e-3,max(x-move,min(1.,min(x+move,x.*(max(1e-10,-dc./lmid)).^0.3))));
   if sum(sum(xnew)) - volfrac*nelx*nely > 0;
     l1 = lmid;
   else
@@ -106,16 +77,23 @@ end
 %%%%%%%%%% FE-ANALYSIS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 function [U, Uout]=FE(nelx,nely,x,penal)
 [KE] = lk; 
-K = sparse(2*(nelx+1)*(nely+1), 2*(nelx+1)*(nely+1));
 F = sparse(2*(nely+1)*(nelx+1),2); U = sparse(2*(nely+1)*(nelx+1),2);
-for elx = 1:nelx
-  for ely = 1:nely
-    n1 = (nely+1)*(elx-1)+ely; 
-    n2 = (nely+1)* elx   +ely;
-    edof = [2*n1-1; 2*n1; 2*n2-1; 2*n2; 2*n2+1; 2*n2+2; 2*n1+1; 2*n1+2];
-    K(edof,edof) = K(edof,edof) + x(ely,elx)^penal*KE;
-  end
-end
+% K = sparse(2*(nelx+1)*(nely+1), 2*(nelx+1)*(nely+1));
+% for elx = 1:nelx
+%   for ely = 1:nely
+%     n1 = (nely+1)*(elx-1)+ely; 
+%     n2 = (nely+1)* elx   +ely;
+%     edof = [2*n1-1; 2*n1; 2*n2-1; 2*n2; 2*n2+1; 2*n2+2; 2*n1+1; 2*n1+2];
+%     K(edof,edof) = K(edof,edof) + x(ely,elx)^penal*KE;
+%   end
+% end
+nodenrs = reshape(1:(1+nelx)*(1+nely),1+nely,1+nelx);
+edofVec = reshape(2*nodenrs(1:end-1,1:end-1)+1,nelx*nely,1);
+edofMat = repmat(edofVec,1,8)+repmat([-2 -1 2*nely+[0 1 2 3] 0 1],nelx*nely,1);
+iK = reshape(kron(edofMat, ones(8, 1))', 64 * nelx * nely, 1);
+jK = reshape(kron(edofMat, ones(1, 8))', 64 * nelx * nely, 1);
+sK = reshape(KE(:)*(x(:)'.^penal),64*nelx*nely,1);
+K = sparse(iK, jK, sK); K = (K+K')/2;
 % DEFINE LOADS AND SUPPORTS (HALF FORCE INVERTER)
 din = 1;
 dout = 2*nelx*(nely+1)+1;

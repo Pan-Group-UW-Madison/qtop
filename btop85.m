@@ -99,6 +99,17 @@ function btop85(nelx, nely, volfrac, penal, n_mu, n_mv, mp, mq)
     disp(['total time: ', num2str(totalTime), 's']);
     disp(['optimization time: ', num2str(optTime), 's']);
     colormap(gray); imagesc(1-xPhys); caxis([0 1]); axis equal; axis off; drawnow;
+
+
+    figure;
+    pcolor(reshape(U(1:2:end), nely + 1, nelx + 1));
+    axis equal;
+    colorbar;
+    
+    figure;
+    pcolor(reshape(U(2:2:end), nely + 1, nelx + 1));
+    axis equal;
+    colorbar;
     %%%%% B-spline basis from recursive definition %%%%%%%%%%%%%%%%%%%%%%%%%%%%
     function [base] = getUniformBsplineBasis(p, t)
         base = 1; z = 0;

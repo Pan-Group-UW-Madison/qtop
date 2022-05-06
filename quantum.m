@@ -5,6 +5,9 @@ clc;
 figure;
 set(gcf, 'position', [200, 200, 600, 200])
 
+optTime = 0;
+t1 = tic;
+
 nelx = 120;
 nely = 40;
 rmin = 2;
@@ -64,7 +67,7 @@ Hs = sum(H, 2);
 x = ones(nely, nelx);
 loop = 0;
 
-dvol = 100;
+dvol = 80;
 stage = 1;
 totalLoop = 0;
 epsilon = 1e-2;
@@ -91,7 +94,7 @@ while stage < 3
         epsilon = 1e-5;
     end
 
-    colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+%     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
     innerLoop = 0;
     exitFlag = 1;
@@ -111,16 +114,18 @@ while stage < 3
     U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
     ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
     c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
-    ce(:) = ce .* x;
+    ce(:) = ce .* xPhys.^2;
     ce(:) = H * (ce(:) ./ Hs);
 
+    optTimer1 = tic;
     [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
+    optTime = optTime + toc(optTimer1);
 
     x = reshape(xResult, size(x, 1), size(x, 2));
     xOptimal = x;
 
     %     subplot(2, 1, 2);
-    colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+%     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
     while (1)
         innerLoop = innerLoop + 1;
@@ -132,7 +137,7 @@ while stage < 3
         U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
         ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
         c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
-        ce(:) = ce .* x;
+        ce(:) = ce .* xPhys.^2;
         ce(:) = H * (ce(:) ./ Hs);
 
         if c < Upper
@@ -167,7 +172,9 @@ while stage < 3
         end
 
         % master problem
+        optTimer1 = tic;
         [xResult, cost, exitFlag] = gbdMasterCut(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        optTime = optTime + toc(optTimer1);
 
         if exitFlag == 1
             x = reshape(xResult, size(x, 1), size(x, 2));
@@ -175,7 +182,7 @@ while stage < 3
             break;
         end
 
-        colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
+%         colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
 
         if cost > Upper || (Upper - cost) / Upper < epsilon
             compliance = [compliance; Upper];
@@ -205,62 +212,102 @@ while stage < 3
 
 end
 
-disp(numFeasibleCut)
-disp(Upper)
-disp(totalLoop)
+totalTime = toc(t1);
+disp(['total time: ', num2str(totalTime), 's']);
+disp(['optimization time: ', num2str(optTime), 's']);
 
-figure;
-hold on;
-yyaxis left
-plot(compliance, 'b.-');
-yyaxis right
-plot(volume ./ (nelx * nely), 'r.-');
+colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
-save('gbd_history_dvol200', 'compliance');
+% save('gbd_history_dvol200', 'compliance');
 
 function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
     n = size(y, 2);
     m = size(yFeasible, 2);
-    l = size(y, 1);
-    f = zeros(1, l + 1);
-    f(1) = 1;
-    lb = zeros(1, l + 1);
-    lb(1) = -inf;
-    ub = ones(1, l + 1);
-    ub(1) = inf;
+    if n > 1
+        l = size(y, 1);
+        f = zeros(1, l + 1);
+        f(1) = 1;
+        lb = zeros(1, l + 1);
+        lb(1) = -inf;
+        ub = ones(1, l + 1);
+        ub(1) = inf;
 
-    A = zeros(n + m + 1, l + 1);
-    b = zeros(n + m + 1, 1);
+        A = zeros(n + m, l + 1);
+        b = zeros(n + m, 1);
 
-    for i = 1:n
-        A(i, 1) = -1;
-        A(i, 2:end) = -weight(i, :);
-        b(i) = -obj(i) - weight(i, :) * y(:, i);
-    end
+        for i = 1:n
+            A(i, 1) = -1;
+            A(i, 2:end) = -weight(i, :);
+            b(i) = -obj(i) - weight(i, :) * y(:, i);
+        end
 
-    for i = 1:m
-        A(i + n, 2:end) = weightFeasible(i, :);
-        b(i + n) = objFeasible(i);
-    end
+        for i = 1:m
+            A(i + n, 2:end) = weightFeasible(i, :);
+            b(i + n) = objFeasible(i);
+        end
 
-    intcon = 1:l;
-    intcon = intcon + 1;
+        intcon = 1:l;
+        intcon = intcon + 1;
+        
+%         A(end, :) = ones(1, l+1);
+%         A(end, 1) = 0;
+%         b(end) = vol;
 
-    A(end, :) = ones(1, l + 1);
-    A(end, 1) = 0;
-    b(end) = vol;
+        Aeq = ones(1, l + 1);
+        Aeq(1, 1) = 0;
+        beq = vol;
 
-    % Aeq = ones(1, l + 1);
-    % Aeq(1, 1) = 0;
-    % beq = vol;
+        %     options = optimoptions('intlinprog','IntegerPreprocess','none');
+        [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, Aeq, beq, lb, ub);
+%         xComparison = linprog(f, A, b, Aeq, beq, lb, ub);
+%         
+%         disp(['LP difference: ', num2str(norm(round(x(2:end))-round(xComparison(2:end)), 1))]);
 
-    %     options = optimoptions('intlinprog','IntegerPreprocess','none');
-    [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, [], [], lb, ub);
+        if exitFlag ~= 1
+            x = y;
+        else
+            x = x(2:end);
+        end
 
-    if exitFlag ~= 1
-        x = y;
     else
-        x = x(2:end);
+        l = size(y, 1);
+        xOptimal = y(:, 1);
+        objOptimal = inf;
+
+        f = -weight(1, :);
+        lb = zeros(1, l);
+        ub = ones(1, l);
+
+        intcon = 1:l;
+
+        Aeq = ones(1, l);
+        beq = vol;
+
+        %     options = optimoptions('intlinprog','IntegerPreprocess','none');
+        [x, ~, exitFlag, ~] = intlinprog(f, intcon, [], [], Aeq, beq, lb, ub);
+        %         [x, ~, exitFlag, ~] = linprog(f, [], [], Aeq, beq, lb, ub);
+
+        if exitFlag == 1
+            objFunc = -inf;
+
+            for j = 1:n
+                objSelect = obj(j) - weight(j, :) * (x - y(:, j));
+
+                if objSelect > objFunc
+                    objFunc = objSelect;
+                end
+
+            end
+
+            if objFunc < objOptimal
+                xOptimal = x;
+                objOptimal = objFunc;
+            end
+
+        end
+
+        x = xOptimal;
+        objFunc = objOptimal;
     end
 
 end

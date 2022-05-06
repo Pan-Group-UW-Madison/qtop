@@ -1,13 +1,15 @@
 %%%% A 99 LINE TOPOLOGY OPTIMIZATION CODE BY OLE SIGMUND, JANUARY 2000 %%%
 %%%% CODE MODIFIED FOR INCREASED SPEED, September 2002, BY OLE SIGMUND %%%
-function top_thermal(nelx, nely, volfrac, penal, rmin)
+function top_thermal_vol(nelx, nely, volfrac0, penal, rmin)
     close all;
     h1 = figure(1);
     set(h1, 'position', [10, 200, 600, 600])
     h2 = figure(2);
     set(h2, 'position', [700, 200, 600, 600])
     % INITIALIZE
+    volfrac = 0.9;
     x(1:nely, 1:nelx) = volfrac;
+    while volfrac >= volfrac0
     %     load('x_thermal.mat');
     loop = 0;
     change = 1.;
@@ -27,7 +29,6 @@ function top_thermal(nelx, nely, volfrac, penal, rmin)
     jK = reshape(kron(edofMat, ones(1, 4))', 16 * nelx * nely, 1);
     % DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
     F = sparse(1:(nelx + 1) * (nely + 1), 1, 0.01, (nelx + 1) * (nely + 1), 1);
-%     F = sparse(ceil((nelx+1)*(nely+1)/2), 1, 0.01, (nelx + 1) * (nely + 1), 1);
     U = zeros((nely + 1) * (nelx + 1), 1);
     fixeddofs = nely / 2 + 1 - floor(nely / 20):nely / 2 + 1 + floor(nely / 20);
     % fixeddofs = 1:nely+1;
@@ -130,8 +131,25 @@ function top_thermal(nelx, nely, volfrac, penal, rmin)
 %     
 %         end
 %         disp(c);
-        save('x_thermal', 'x');
+%         save('x_thermal', 'x');
     %     colormap(gray); imagesc(-x); axis equal; axis tight; axis off; pause(1e-6);
+        volfrac = volfrac - 0.1;
+        x = x / (volfrac + 0.1) * volfrac;
+    end
+
+    x(x>0.5) = 1;
+    x(x<0.5) = 1e-3;
+    xPhys = x;
+    sK = reshape(KE(:) * (kmin + xPhys(:)'.^penal * (k0 - kmin)), 16 * nelx * nely, 1);
+    K = sparse(iK, jK, sK); K = (K + K') / 2;
+    U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
+    %% OBJECTIVE FUNCTION AND SENSITIVITY ANALYSIS
+    ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
+    c = sum(sum((kmin + xPhys.^penal * (k0 - kmin)) .* ce));
+    disp(c);
+    disp(sum(x(:)));
+    figure(1);
+    colormap(gray); imagesc(-x); axis equal; axis tight; axis off;
 end
 
 %%%%%%%%%% OPTIMALITY CRITERIA UPDATE %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -140,7 +158,7 @@ function [xnew] = OC(nelx, nely, x, volfrac, dc)
 
     while (l2 - l1 > 1e-6)
         lmid = 0.5 * (l2 + l1);
-        xnew = max(1e-3, max(x - move, min(1., min(x + move, x .* sqrt(-dc ./ lmid)))));
+        xnew = max(0.001, max(x - move, min(1., min(x + move, x .* sqrt(-dc ./ lmid)))));
 
         if sum(sum(xnew)) - volfrac * nelx * nely > 0
             l1 = lmid;
