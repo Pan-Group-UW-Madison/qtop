@@ -7,14 +7,16 @@ set(gcf, 'position', [200, 200, 600, 600]);
 optTime = 0;
 t1 = tic;
 
-nelx = 150;
-nely = 150;
-rmin = 2;
+numFEM = 0;
+scale = 1e9;
+nelx = 200;
+nely = 200;
+rmin = 1.5;
 volfrac0 = 0.5;
 volfrac = 1.0;
 %% MATERIAL PROPERTIES
 k0 = 1.0; % good thermal conductivity
-kmin = 5e-3; % poor thermal conductivity
+kmin = 1e-3; % poor thermal conductivity
 %% PREPARE FINITE ELEMENT ANALYSIS
 KE = [2/3 -1/6 -1/3 -1/6
     -1/6 2/3 -1/6 -1/3
@@ -67,7 +69,7 @@ Hs = sum(H, 2);
 loop = 0;
 x = ones(nely, nelx);
 
-dvol = 400;
+dvol = 0.98;
 stage = 1;
 totalLoop = 0;
 epsilon = 1e-7;
@@ -115,14 +117,18 @@ while stage < 3
 
     if stage == 1
         vol = floor(volfrac * nelx * nely);
-        vol = vol - dvol;
+        vol = floor(dvol * vol);
+        if mod(vol, 2) == 1
+            vol = vol - 1;
+        end
+%         vol = vol - dvol;
         vol = max(vol, volfrac0 * nelx * nely);
         volfrac = vol / (nelx * nely);
     end
 
     if stage == 2
         vol = floor(volfrac0 * nelx * nely);
-        epsilon = 1e-9;
+%         kmin = 1e-3;
     end
 
     %     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
@@ -139,27 +145,39 @@ while stage < 3
     cFeasible = [];
 
     % prepare the intitial solution
-    xPhys = x;
-    %     xPhys = reshape(H * (x(:) ./ Hs), nely, nelx);
-    xPhys(xPhys < 1e-3) = kmin;
-    xPhys(x > 1e-3) = k0;
-    sK = reshape(KE(:) * (xPhys(:)'), 16 * nelx * nely, 1);
-    K = sparse(iK, jK, sK); K = (K + K') / 2;
-    U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
-    ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
-    ce(:) = ce .* xPhys.^2;
-%     ce(:) = ce .* x;
-    c = F' * U;
-    if stage == 2
-        ce(:) = H * (ce(:) ./ Hs);
+    if stage == 1
+        xPhys = x;
+        xPhys(x < 1e-3) = kmin;
+        xPhys(x > 0.5) = k0;
+
+%         xPhys = x;
+%         xPhys(:) = H * (xPhys(:) ./ Hs);
+%         xPhys(xPhys > 1) = 1;
+%         xPhys(xPhys < 1e-3) = kmin;
+
+        sK = reshape(KE(:) * (xPhys(:)'), 16 * nelx * nely, 1);
+        K = sparse(iK, jK, sK); K = (K + K') / 2;
+        U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
+        ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
+%         
+        ce(x < 0.5) = ce(x < 0.5) .* xPhys(x < 0.5).^2;
+%         ce(:) = ce .* x;
+%         ce(:) = H * (ce(:) ./ Hs);
+        c = F' * U;
+%         if stage == 2
+%             
+%         end
+        ce = ce * scale;
+        c = c * scale;
+        numFEM = numFEM + 1;
+    
+        optTimer1 = tic;
+        [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), vol);
+        optTime = optTime + toc(optTimer1);
+    
+        x = reshape(xResult, size(x, 1), size(x, 2));
+        xOptimal = x;
     end
-
-    optTimer1 = tic;
-    [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
-    optTime = optTime + toc(optTimer1);
-
-    x = reshape(xResult, size(x, 1), size(x, 2));
-    xOptimal = x;
 
 %     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
@@ -169,22 +187,33 @@ while stage < 3
         % primal problem
         xPhys = x;
         xPhys(x < 1e-3) = kmin;
-        xPhys(x > 1e-3) = k0;
+        xPhys(x > 0.5) = k0;
+
+%         xPhys = x;
+%         xPhys(:) = H * (xPhys(:) ./ Hs);
+%         xPhys(xPhys > 1) = 1;
+%         xPhys(xPhys < 1e-3) = kmin;
+
         sK = reshape(KE(:) * (xPhys(:)'), 16 * nelx * nely, 1);
         K = sparse(iK, jK, sK); K = (K + K') / 2;
         U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
-        ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);        
-        ce(:) = ce .* xPhys.^2;
+        ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
+%         ce(:) = H * (ce(:) ./ Hs);
+        ce(x < 0.5) = ce(x < 0.5) .* xPhys(x < 0.5).^2;
 %         ce(:) = ce .* x;
+%         ce(:) = H * (ce(:) ./ Hs);
         c = F' * U;
-        if stage == 2
-            ce(:) = H * (ce(:) ./ Hs);
-        end
+%         if stage == 2
+%             ce(:) = H * (ce(:) ./ Hs);
+%         end
+        ce = ce * scale;
+        numFEM = numFEM + 1;
 
         if c < Upper
             xOptimal = x;
             Upper = c;
         end
+        c = c * scale;
 
         % check feasibility
         if norm(U) > 1e9
@@ -213,26 +242,39 @@ while stage < 3
 
         % master problem
         optTimer1 = tic;
-        [xResult, cost, exitFlag] = gbdMasterCut(xTarget(:, index), cTarget(index), ceTarget(index, :), xFeasible, cFeasible, ceFeasible, vol);
+        [xResult, cost, exitFlag] = gbdMasterCut(xTarget(:, index), cTarget(index), ceTarget(index, :), vol);
+        cost = cost / scale;
         optTime = optTime + toc(optTimer1);
 
         x = reshape(xResult, size(x, 1), size(x, 2));
 
+        fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%, index: %d\n', loop, Upper, sum(x(:)/nelx/nely), (Upper - cost) / Upper * 100, length(index));
+
+%         figure(1);
 %         colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
+%         figure(2);
+%         Ue = reshape(U, nely + 1, nelx + 1);
+%         Ue = Ue(end:-1:1, :);
+%         h = pcolor(Ue);
+%         set(h, 'EdgeColor', 'none');
+%         axis equal;
+%         colorbar;
+%         caxis([0 5]);
+%         figure(3);
+%         hold on;
+%         yyaxis left
+%         plot(compliance, 'b.-');
+%         yyaxis right
+%         plot(volume ./ (nelx * nely), 'r.-');
 
         if cost > Upper || (Upper - cost) / Upper < epsilon
             compliance = [compliance; Upper];
             volume = [volume; vol];
-
-            fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%\n', loop, Upper, sum(x(:)), (Upper - cost) / Upper * 100);
-
             break;
         end
 
         compliance = [compliance; Upper];
         volume = [volume; vol];
-
-        fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%\n', loop, Upper, sum(x(:)), (Upper - cost) / Upper * 100);
 
     end
 
@@ -252,26 +294,29 @@ totalTime = toc(t1);
 disp(['total time: ', num2str(totalTime), 's']);
 disp(['optimization time: ', num2str(optTime), 's']);
 
+figure(1);
 colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
 
-figure;
+figure(3);
 hold on;
 yyaxis left
 plot(compliance, 'b.-');
 yyaxis right
 plot(volume ./ (nelx * nely), 'r.-');
 
-figure;
-pcolor(reshape(U, nelx + 1, nely + 1));
+figure(2);
+Ue = reshape(U, nely + 1, nelx + 1);
+Ue = Ue(end:-1:1, :);
+h = pcolor(Ue);
+set(h, 'EdgeColor', 'none');
 axis equal;
 colorbar;
-% caxis([0 50]);
+caxis([0 2]);
 
 % save('x_thermal', 'x');
 
-function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
+function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, vol)
     n = size(y, 2);
-    m = size(yFeasible, 2);
     if n > 1
         l = size(y, 1);
         f = zeros(1, l + 1);
@@ -281,8 +326,8 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
         ub = ones(1, l + 1);
         ub(1) = inf;
 
-        A = zeros(n + m, l + 1);
-        b = zeros(n + m, 1);
+        A = zeros(n + 1, l + 1);
+        b = zeros(n + 1, 1);
 
         for i = 1:n
             A(i, 1) = -1;
@@ -290,23 +335,14 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
             b(i) = -obj(i) - weight(i, :) * y(:, i);
         end
 
-        for i = 1:m
-            A(i + n, 2:end) = weightFeasible(i, :);
-            b(i + n) = objFeasible(i);
-        end
-
         intcon = 1:l;
         intcon = intcon + 1;
-        
-%         A(end, :) = ones(1, l+1);
-%         A(end, 1) = 0;
-%         b(end) = vol;
 
-        Aeq = ones(1, l + 1);
-        Aeq(1, 1) = 0;
-        beq = vol;
+        A(end, :) = ones(1, l + 1);
+        A(end, 1) = 0;
+        b(end) = vol;
 
-        [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, Aeq, beq, lb, ub);
+        [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, [], [], lb, ub);
 
         x = x(2:end);
 
@@ -324,9 +360,7 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
         Aeq = ones(1, l);
         beq = vol;
 
-%         options = optimoptions('intlinprog','IntegerPreprocess','none');
-        [x, ~, exitFlag, ~] = intlinprog(f, intcon, [], [], Aeq, beq, lb, ub);
-        %         [x, ~, exitFlag, ~] = linprog(f, [], [], Aeq, beq, lb, ub);
+        [x, ~, exitFlag, ~] = intlinprog(f, intcon, Aeq, beq, [], [], lb, ub);
 
         if exitFlag == 1
             objFunc = -inf;

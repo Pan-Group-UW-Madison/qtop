@@ -1,8 +1,8 @@
 % Matlab code for topology optimization using a reaction diffusion equation
-function [str, phi] = levelset88(nelx, nely, Vmax, tau)
+function [str, phi] = levelset_thermal(nelx, nely, Vmax, tau)
     %% Parameter definition
     k0 = 1;
-    kmin = 1e-4;
+    kmin = 1e-3;
     nvol = 100;
     dt = 0.1;
     d = -0.02;
@@ -12,11 +12,10 @@ function [str, phi] = levelset88(nelx, nely, Vmax, tau)
     volInit = sum(str(:)) / (nelx * nely);
     %% Finite element analysis preparation
     % For displacement field
-    A11 = [12 3 -6 -3; 3 12 3 0; -6 3 12 -3; -3 0 -3 12];
-    A12 = [-6 -3 0 3; -3 -6 -3 -6; 0 -3 -6 3; 3 -6 3 -6];
-    B11 = [-4 3 -2 9; 3 -4 -9 4; -2 -9 -4 -3; 9 4 -3 -4];
-    B12 = [2 -3 4 -9; -3 2 9 -2; 4 9 2 3; -9 -2 3 2];
-    KE = 1 / (1 - nu^2) / 24 * ([A11 A12; A12' A11] + nu * [B11 B12; B12' B11]);
+    KE = [2/3 -1/6 -1/3 -1/6
+        -1/6 2/3 -1/6 -1/3
+        -1/3 -1/6 2/3 -1/6
+        -1/6 -1/3 -1/6 2/3];
     % For Topological derivative
     a1 = 3 * (1 - nu) / (2 * (1 + nu) * (7 - 5 * nu)) * (- (1 - 14 * nu + 15 * nu^2) * k0) / (1 - 2 * nu)^2;
     a2 = 3 * (1 - nu) / (2 * (1 + nu) * (7 - 5 * nu)) * 5 * k0;

@@ -16,7 +16,7 @@ function top_thermal_h(nelx, nely, volfrac, penal, rmin, ft)
     iK = reshape(kron(edofMat, ones(4, 1))', 16 * nelx * nely, 1);
     jK = reshape(kron(edofMat, ones(1, 4))', 16 * nelx * nely, 1);
     % DEFINE LOADS AND SUPPORTS (HALF MBB-BEAM)
-    F = sparse(1:(nelx + 1) * (nely + 1), 1, 10 / nelx / nely, (nelx + 1) * (nely + 1), 1);
+    F = sparse(1:(nelx + 1) * (nely + 1), 1, 1 / nelx / nely, (nelx + 1) * (nely + 1), 1);
     U = zeros((nely + 1) * (nelx + 1), 1);
     fixeddofs = nely / 2 + 1 - floor(nely / 20):nely / 2 + 1 + floor(nely / 20);
     % fixeddofs = 1:nely+1;
@@ -67,7 +67,7 @@ function top_thermal_h(nelx, nely, volfrac, penal, rmin, ft)
     loop = 0;
     change = 1;
     %% START ITERATION
-    while change > 0.01 && loop < 500
+    while change > 0.01 && loop < 100
         loopbeta = loopbeta + 1;
         loop = loop + 1;
         %% FE-ANALYSIS
@@ -175,7 +175,8 @@ function top_thermal_h(nelx, nely, volfrac, penal, rmin, ft)
     figure;
     colormap(gray); imagesc(1 - xPhys); caxis([0 1]); axis equal; axis off; drawnow;
     figure;
-    pcolor(reshape(U, nelx + 1, nely + 1));
+    h = pcolor(reshape(U, nelx + 1, nely + 1));
+    set(h, 'EdgeColor', 'none');
     colorbar;
     axis equal;
 
