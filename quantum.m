@@ -3,13 +3,14 @@ close all;
 clc;
 
 figure;
+tiledlayout(1,1, 'TileSpacing', 'none', 'Padding', 'none')
 set(gcf, 'position', [200, 200, 600, 200])
 
 optTime = 0;
 t1 = tic;
 
-nelx = 120;
-nely = 40;
+nelx = 240;
+nely = 80;
 rmin = 2;
 volfrac0 = 0.5;
 volfrac = 1.0;
@@ -67,15 +68,19 @@ Hs = sum(H, 2);
 x = ones(nely, nelx);
 loop = 0;
 
-dvol = 80;
+dvol = 1600;
 stage = 1;
 totalLoop = 0;
-epsilon = 1e-2;
+epsilon = 1e-3;
+
+numFEM = 0;
 
 numFeasibleCut = 0;
 
 compliance = [];
 volume = [];
+
+outputGif = 1;
 
 while stage < 3
     loop = loop + 1;
@@ -117,6 +122,8 @@ while stage < 3
     ce(:) = ce .* xPhys.^2;
     ce(:) = H * (ce(:) ./ Hs);
 
+    numFEM = numFEM + 1;
+
     optTimer1 = tic;
     [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
     optTime = optTime + toc(optTimer1);
@@ -139,6 +146,8 @@ while stage < 3
         c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
         ce(:) = ce .* xPhys.^2;
         ce(:) = H * (ce(:) ./ Hs);
+
+        numFEM = numFEM + 1;
 
         if c < Upper
             xOptimal = x;
@@ -182,9 +191,32 @@ while stage < 3
             break;
         end
 
-%         colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
+%         xPhys = x;
+%         sK = reshape(KE(:) * (Emin + xPhys(:)' * (E0 - Emin)), 64 * nelx * nely, 1);
+%         K = sparse(iK, jK, sK); K = (K + K') / 2;
+%         U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
+%         ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
+%         c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
+%         cost = c;
 
-        if cost > Upper || (Upper - cost) / Upper < epsilon
+%         colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
+        set(gca, 'Position', [0, 0, 1, 1])
+        colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+        pause(0.1);
+        filename = 'binary.gif';
+        frame = getframe(gcf);
+        im = frame2im(frame);
+        [imind,cm] = rgb2ind(im,256);
+        if outputGif == 1
+            imwrite(imind,cm,filename,'gif', 'Loopcount',inf,...
+            'DelayTime',0.1);
+            outputGif = 2;
+        else
+            imwrite(imind,cm,filename,'gif','WriteMode','append',...
+            'DelayTime',0.1);
+        end
+
+        if cost > Upper || abs(Upper - cost) / Upper < epsilon
             compliance = [compliance; Upper];
             volume = [volume; vol];
 
@@ -215,171 +247,89 @@ end
 totalTime = toc(t1);
 disp(['total time: ', num2str(totalTime), 's']);
 disp(['optimization time: ', num2str(optTime), 's']);
+disp(['num of fem: ', num2str(numFEM)]);
 
 colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+pause(0.1);
+filename = 'binary.gif';
+frame = getframe(gcf);
+im = frame2im(frame);
+[imind,cm] = rgb2ind(im,256);
+if outputGif == 1
+    imwrite(imind,cm,filename,'gif', 'Loopcount',inf,...
+    'DelayTime',0.1);
+    outputGif = 2;
+else
+    imwrite(imind,cm,filename,'gif','WriteMode','append',...
+    'DelayTime',0.1);
+end
 
 % save('gbd_history_dvol200', 'compliance');
 
 function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
     n = size(y, 2);
-    m = size(yFeasible, 2);
     if n > 1
         l = size(y, 1);
         f = zeros(1, l + 1);
         f(1) = 1;
-        lb = zeros(1, l + 1);
-        lb(1) = -inf;
-        ub = ones(1, l + 1);
-        ub(1) = inf;
-
-        A = zeros(n + m, l + 1);
-        b = zeros(n + m, 1);
+        A = zeros(n + 1, l + 1);
+        b = zeros(n + 1, 1);
 
         for i = 1:n
             A(i, 1) = -1;
             A(i, 2:end) = -weight(i, :);
-            b(i) = -obj(i) - weight(i, :) * y(:, i);
+            b(i) = -obj(i) -weight(i, :) * y(:, i);
         end
 
-        for i = 1:m
-            A(i + n, 2:end) = weightFeasible(i, :);
-            b(i + n) = objFeasible(i);
+        A(n+1, :) = ones(1, l + 1);
+        A(n+1, 1) = 0;
+        b(n+1) = vol;
+
+        model.obj = f;
+        model.A = sparse(A);
+        model.rhs = b;
+        for i = 1:n
+            model.sense(i) = '<';
         end
-
-        intcon = 1:l;
-        intcon = intcon + 1;
-        
-%         A(end, :) = ones(1, l+1);
-%         A(end, 1) = 0;
-%         b(end) = vol;
-
-        Aeq = ones(1, l + 1);
-        Aeq(1, 1) = 0;
-        beq = vol;
-
-        %     options = optimoptions('intlinprog','IntegerPreprocess','none');
-        [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, Aeq, beq, lb, ub);
-%         xComparison = linprog(f, A, b, Aeq, beq, lb, ub);
-%         
-%         disp(['LP difference: ', num2str(norm(round(x(2:end))-round(xComparison(2:end)), 1))]);
-
-        if exitFlag ~= 1
-            x = y;
-        else
-            x = x(2:end);
+        model.sense(n+1) = '=';
+        for i = 1:l
+            model.vtype(i+1) = 'B';
         end
+        model.vtype(1) = 'C';
+        model.lb = zeros(1, l+1);
+        model.lb(1) = -inf;
+        model.ub = ones(1, l+1);
+        model.ub(1) = inf;
+        model.modelsense = 'min';
+
+        params.outputflag = 0;
+
+        result = gurobi(model, params);
+
+%         [x, objFunc, exitFlag, ~] = intlinprog(f, intcon, A, b, Aeq, beq, lb, ub);
+
+        x = result.x(2:end);
+        objFunc = result.x(1);
+        exitFlag = 1;
 
     else
         l = size(y, 1);
-        xOptimal = y(:, 1);
-        objOptimal = inf;
+        model.obj = -weight(1, :);
+        model.A = sparse(ones(1, l));
+        model.rhs = vol;
+        model.sense = '=';
+        model.vtype = 'B';
+        model.modelsense = 'min';
 
-        f = -weight(1, :);
-        lb = zeros(1, l);
-        ub = ones(1, l);
+        params.outputflag = 0;
 
-        intcon = 1:l;
+        result = gurobi(model, params);
 
-        Aeq = ones(1, l);
-        beq = vol;
-
-        %     options = optimoptions('intlinprog','IntegerPreprocess','none');
-        [x, ~, exitFlag, ~] = intlinprog(f, intcon, [], [], Aeq, beq, lb, ub);
-        %         [x, ~, exitFlag, ~] = linprog(f, [], [], Aeq, beq, lb, ub);
-
-        if exitFlag == 1
-            objFunc = -inf;
-
-            for j = 1:n
-                objSelect = obj(j) - weight(j, :) * (x - y(:, j));
-
-                if objSelect > objFunc
-                    objFunc = objSelect;
-                end
-
-            end
-
-            if objFunc < objOptimal
-                xOptimal = x;
-                objOptimal = objFunc;
-            end
-
-        end
-
-        x = xOptimal;
-        objFunc = objOptimal;
+        x = result.x;
+        objFunc = obj(1) - weight(1, :) * (x - y(:, 1));
+        exitFlag = 1;
     end
 
-end
-
-function [x, objFunc, exitFlag] = gbdMasterCutRelaxed(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
-    n = size(y, 2);
-    m = size(yFeasible, 2);
-    l = size(y, 1);
-
-    xOptimal = y(:, 1);
-    objOptimal = inf;
-
-    for i = 1:n
-        f = -weight(i, :);
-        lb = zeros(1, l);
-        ub = ones(1, l);
-
-        intcon = 1:l;
-
-        Aeq = ones(1, l);
-        beq = vol;
-
-        %     options = optimoptions('intlinprog','IntegerPreprocess','none');
-        [x, ~, exitFlag, ~] = intlinprog(f, intcon, Aeq, beq, [], [], lb, ub);
-
-        if exitFlag == 1
-            objFunc = -inf;
-
-            for j = 1:n
-                objSelect = obj(j) - weight(j, :) * (x - y(:, j));
-
-                if objSelect > objFunc
-                    objFunc = objSelect;
-                end
-
-            end
-
-            if objFunc < objOptimal
-                xOptimal = x;
-                objOptimal = objFunc;
-            end
-
-        end
-
-    end
-
-    x = xOptimal;
-    objFunc = objOptimal;
-end
-
-function [x, objFunc, exitFlag] = gbdMasterCutQuantum(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol)
-    exitFlag = 1;
-
-    % reduce the amount of variables
-    weightSparse = sparse(weight);
-    [~, nonzero] = find(weightSparse);
-    nonzero = unique(sort(nonzero));
-
-    weightReduced = weight(:, nonzero);
-    objReduced = obj;
-    yReduced = y(nonzero, :);
-
-    save('quantum.mat', 'weightReduced', 'objReduced', 'yReduced', 'vol');
-    system('python3 cut_solver.py');
-    load('result.mat');
-
-    x = zeros(size(y, 1), 1);
-    x(nonzero) = res;
-
-    [xCompare, objFuncCompare, ~] = gbdMasterCut(y, obj, weight, yFeasible, objFeasible, weightFeasible, vol);
-    fprintf("norm difference: %f\n", norm(x - xCompare, 1));
-    disp([objFunc, objFuncCompare]);
 end
 
 function lambda = feasibilityCut(K, f, UB)
