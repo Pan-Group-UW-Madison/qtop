@@ -2,17 +2,17 @@ clear all;
 close all;
 clc;
 
+nelx = 360;
+nely = 120;
+
 figure;
 tiledlayout(1,1, 'TileSpacing', 'none', 'Padding', 'none')
-set(gcf, 'position', [200, 200, 600, 200])
+set(gcf, 'position', [200, 200, 200*(nelx/nely), 200])
 
 optTime = 0;
 t1 = tic;
-
-nelx = 240;
-nely = 80;
-rmin = 2;
-volfrac0 = 0.5;
+rmin = 6;
+volfrac0 = 0.3;
 volfrac = 1.0;
 %% MATERIAL PROPERTIES
 E0 = 1;
@@ -68,10 +68,10 @@ Hs = sum(H, 2);
 x = ones(nely, nelx);
 loop = 0;
 
-dvol = 1600;
+dvol = 432;
 stage = 1;
 totalLoop = 0;
-epsilon = 1e-3;
+epsilon = 1e-4;
 
 numFEM = 0;
 
@@ -92,11 +92,15 @@ while stage < 3
         vol = vol - dvol;
         vol = max(vol, volfrac0 * nelx * nely);
         volfrac = vol / (nelx * nely);
+        if (abs(vol - volfrac0 * nelx * nely) < 1)
+            epsilon = 1e-4;
+        end
     end
 
     if stage == 2
         vol = floor(volfrac0 * nelx * nely);
         epsilon = 1e-5;
+        break;
     end
 
 %     colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
@@ -113,16 +117,19 @@ while stage < 3
     cFeasible = [];
 
     % prepare the intitial solution
-    xPhys = x;
-    sK = reshape(KE(:) * (Emin + xPhys(:)' * (E0 - Emin)), 64 * nelx * nely, 1);
-    K = sparse(iK, jK, sK); K = (K + K') / 2;
-    U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
-    ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
-    c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
-    ce(:) = ce .* xPhys.^2;
-    ce(:) = H * (ce(:) ./ Hs);
-
-    numFEM = numFEM + 1;
+    if (loop == 1)
+        xPhys = x;
+        xPhys(xPhys<0.01) = Emin;
+        sK = reshape(KE(:) * (Emin + xPhys(:)' * (E0 - Emin)), 64 * nelx * nely, 1);
+        K = sparse(iK, jK, sK); K = (K + K') / 2;
+        U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
+        ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
+        c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
+        ce(:) = ce .* xPhys;
+        ce(:) = H * (ce(:) ./ Hs);
+        
+        numFEM = numFEM + 1;
+    end
 
     optTimer1 = tic;
     [xResult, cost, exitFlag] = gbdMasterCut(reshape(x, [], 1), c, reshape(ce, 1, []), [], [], [], vol);
@@ -139,12 +146,13 @@ while stage < 3
 
         % primal problem
         xPhys = x;
+        xPhys(xPhys<0.01) = Emin;
         sK = reshape(KE(:) * (Emin + xPhys(:)' * (E0 - Emin)), 64 * nelx * nely, 1);
         K = sparse(iK, jK, sK); K = (K + K') / 2;
         U(freedofs) = K(freedofs, freedofs) \ F(freedofs);
         ce = reshape(sum((U(edofMat) * KE) .* U(edofMat), 2), nely, nelx);
         c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
-        ce(:) = ce .* xPhys.^2;
+        ce(:) = ce .* xPhys;
         ce(:) = H * (ce(:) ./ Hs);
 
         numFEM = numFEM + 1;
@@ -199,28 +207,28 @@ while stage < 3
 %         c = sum(sum((Emin + xPhys * (E0 - Emin)) .* ce));
 %         cost = c;
 
-%         colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
+        colormap(gray); imagesc(1 - xOptimal); caxis([0 1]); axis equal; axis off; drawnow;
         set(gca, 'Position', [0, 0, 1, 1])
-        colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
-        pause(0.1);
-        filename = 'binary.gif';
-        frame = getframe(gcf);
-        im = frame2im(frame);
-        [imind,cm] = rgb2ind(im,256);
-        if outputGif == 1
-            imwrite(imind,cm,filename,'gif', 'Loopcount',inf,...
-            'DelayTime',0.1);
-            outputGif = 2;
-        else
-            imwrite(imind,cm,filename,'gif','WriteMode','append',...
-            'DelayTime',0.1);
-        end
+%         colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
+%         pause(0.1);
+%         filename = 'binary.gif';
+%         frame = getframe(gcf);
+%         im = frame2im(frame);
+%         [imind,cm] = rgb2ind(im,256);
+%         if outputGif == 1
+%             imwrite(imind,cm,filename,'gif', 'Loopcount',inf,...
+%             'DelayTime',0.1);
+%             outputGif = 2;
+%         else
+%             imwrite(imind,cm,filename,'gif','WriteMode','append',...
+%             'DelayTime',0.1);
+%         end
 
         if cost > Upper || abs(Upper - cost) / Upper < epsilon
             compliance = [compliance; Upper];
             volume = [volume; vol];
 
-            fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%\n', loop, Upper, sum(x(:)), (Upper - cost) / Upper * 100);
+            fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%\n', loop, Upper, mean(x(:)), (Upper - cost) / Upper * 100);
 
             break;
         end
@@ -228,7 +236,7 @@ while stage < 3
         compliance = [compliance; Upper];
         volume = [volume; vol];
 
-        fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%\n', loop, Upper, sum(x(:)), (Upper - cost) / Upper * 100);
+        fprintf(' It.:%5i Obj.:%11.4f Vol.:%7.3f, Gap.:%5.3f%%\n', loop, Upper, mean(x(:)), (Upper - cost) / Upper * 100);
 
     end
 
@@ -249,20 +257,21 @@ disp(['total time: ', num2str(totalTime), 's']);
 disp(['optimization time: ', num2str(optTime), 's']);
 disp(['num of fem: ', num2str(numFEM)]);
 
+set(gca, 'Position', [0, 0, 1, 1])
 colormap(gray); imagesc(1 - x); caxis([0 1]); axis equal; axis off; drawnow;
-pause(0.1);
-filename = 'binary.gif';
-frame = getframe(gcf);
-im = frame2im(frame);
-[imind,cm] = rgb2ind(im,256);
-if outputGif == 1
-    imwrite(imind,cm,filename,'gif', 'Loopcount',inf,...
-    'DelayTime',0.1);
-    outputGif = 2;
-else
-    imwrite(imind,cm,filename,'gif','WriteMode','append',...
-    'DelayTime',0.1);
-end
+% pause(0.1);
+% filename = 'binary.gif';
+% frame = getframe(gcf);
+% im = frame2im(frame);
+% [imind,cm] = rgb2ind(im,256);
+% if outputGif == 1
+%     imwrite(imind,cm,filename,'gif', 'Loopcount',inf,...
+%     'DelayTime',0.1);
+%     outputGif = 2;
+% else
+%     imwrite(imind,cm,filename,'gif','WriteMode','append',...
+%     'DelayTime',0.1);
+% end
 
 % save('gbd_history_dvol200', 'compliance');
 
@@ -318,8 +327,10 @@ function [x, objFunc, exitFlag] = gbdMasterCut(y, obj, weight, yFeasible, objFea
         model.A = sparse(ones(1, l));
         model.rhs = vol;
         model.sense = '=';
-        model.vtype = 'B';
+        model.vtype = 'C';
         model.modelsense = 'min';
+        model.lb = zeros(1, l);
+        model.ub = ones(1, l);
 
         params.outputflag = 0;
 
