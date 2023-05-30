@@ -1,2 +1,2 @@
 # qtop
-Quantum computing based Topology Optimization (QTOP)
+Quantum Topology Optimization via Quantum Annealing
