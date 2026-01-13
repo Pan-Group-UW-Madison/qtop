@@ -1,5 +1,5 @@
-# qtop
-Quantum Topology Optimization via Quantum Annealing
+# Quantum Topology Optimization via Quantum Annealing
+
 
 Implementation of the paper (Zisheng Ye et. al, [2023](https://ieeexplore.ieee.org/abstract/document/10099425)).
 
