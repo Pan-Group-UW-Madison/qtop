@@ -9,4 +9,7 @@ Implementation of the paper (Zisheng Ye et. al, [2023](https://ieeexplore.ieee.o
 
 [gbd_quantum.m](./gbd_quantum.m) gives a implementation example of the algorithm with access to D-Wave's quantum annealer for the minimum compliance problem.
 
-A more recent [implementation](https://github.com/zishengye/QTO) with an extension to non-convex or multi-material problems.
+# Later extensions to non-convex or multi-material problems
+[Quantum Topology Optimization via Quantum Annealing](https://github.com/Pan-Group-UW-Madison/qtop)
+
+[Towards Quantum Accelerated Large-scale Topology Optimization](https://github.com/Pan-Group-UW-Madison/QCTO-MDW)
